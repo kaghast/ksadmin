@@ -33,11 +33,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setToken(null);
           setUser(null);
         }
+      } else {
+        setUser(null);
+        setToken(null);
       }
       setIsLoading(false);
     };
 
     initializeAuth();
+
+    // Listen for unauthorized events anywhere in app (e.g. 401/403 responses)
+    const handleUnauthorized = () => {
+      setUser(null);
+      setToken(null);
+      localStorage.removeItem('ksadmin_token');
+    };
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
   }, []);
 
   const login = async (email: string, pass: string) => {

@@ -46,10 +46,24 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
-      // If unauthorized, clear token
+      // If unauthorized, clear token and notify auth context
       localStorage.removeItem('ksadmin_token');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
     }
-    const errorMsg = data?.error || (res.status === 502 || res.status === 504 ? 'Sunucuya ulaşılamıyor (502/504 Ağ Hatası). Coolify container veya port ayarlarını kontrol edin.' : `İşlem gerçekleştirilemedi (${res.status} ${res.statusText}).`);
+    let errorMsg = data?.error;
+    if (!errorMsg || typeof errorMsg !== 'string' || errorMsg.trim() === '') {
+      if (res.status === 405) {
+        errorMsg = 'Sunucu 405 Method Not Allowed döndürdü. Coolify uygulamanız "Static Site" olarak ayarlanmış olabilir; lütfen Coolify ayarlarından Build Pack olarak "Dockerfile" veya "Node.js" seçiniz.';
+      } else if (res.status === 502 || res.status === 504) {
+        errorMsg = 'Sunucuya ulaşılamıyor (502/504 Ağ Hatası). Coolify container veya port ayarlarını (Port 3000) kontrol edin.';
+      } else if (res.status === 404) {
+        errorMsg = 'API servisi bulunamadı (404). Sunucu başlatma komutunun çalıştığından emin olun.';
+      } else {
+        errorMsg = `İşlem gerçekleştirilemedi (${res.status} ${res.statusText || 'Bilinmeyen Hata'}).`;
+      }
+    }
     throw new Error(errorMsg);
   }
 
