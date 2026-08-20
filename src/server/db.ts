@@ -181,6 +181,103 @@ function initSchema(db: Database) {
     );
   `);
 
+  // Mindmap Aylık Versiyonlar Tablosu
+  db.run(`
+    CREATE TABLE IF NOT EXISTS mindmap_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      year INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      month_str TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      theme TEXT DEFAULT 'modern',
+      is_active INTEGER DEFAULT 1,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Initial Seed for Mindmap if empty
+  const mindmapCheck = db.exec("SELECT id FROM mindmap_versions LIMIT 1");
+  if (!mindmapCheck.length || !mindmapCheck[0].values.length) {
+    const defaultMarkdown = `# 🎯 2026 Ağustos Finans & Strateji Haritası
+
+## 💰 Gelir & Nakit Akışı
+### 💼 Maaş & Sabit Gelir
+- Kemal Şahin Maaş: ₺85.000
+- Prim & Ek Gelir: ₺15.000
+### 📈 Pasif Gelirler
+- Vadeli Mevduat Faizi: ₺6.200
+- Temettü / Fon Getirileri: ₺3.800
+### ⏳ Beklenen Tahsilatlar
+- Danışmanlık Projesi: ₺20.000
+
+## 💳 Kredi Kartı & Harcamalar
+### 🛒 Zorunlu Giderler
+- Market & Mutfak: ₺18.500
+- Akaryakıt & Ulaşım: ₺6.000
+- Faturalar & Abonelikler: ₺4.200
+### 🏖️ Yaşam & Sosyal
+- Dışarıda Yemek & Kafe: ₺5.500
+- Giyim & Alışveriş: ₺4.000
+### 💳 Kart Limit Stratejisi
+- Garanti Bonus: Ekstre kapatılacak
+- Yapı Kredi World: Asgari değil, dönem borcu ödenecek
+
+## 🏦 Krediler & Borç Kapatma
+### 📉 Aktif Krediler
+- Konut Kredisi: Taksit 14/120 (₺18.450)
+- İhtiyaç Kredisi: Taksit 8/24 (₺7.800)
+### 🎯 Erken Kapatma Planı
+- İhtiyaç Kredisi 2027 başında toplu kapatılacak
+### 🛡️ KMH / Ek Hesap
+- Garanti Avans Hesap: Borç sıfırlandı
+- Akbank Artı Para: Acil durum için hazır tutuluyor
+
+## 🚀 Tasarruf & Yatırımlar
+### 🥇 Değerli Madenler & Altın
+- Aylık 2 Gram Fiziki Altın alımı
+- Altın Fonu (ZGold): ₺10.000
+### 📊 Borsa & Eurobond
+- BIST30 Temettü Hisseleri: ₺15.000
+- Yabancı Teknoloji Fonları (AFT/TTE): ₺8.000
+### 🛡️ Acil Durum Fonu (6 Aylık)
+- Hedef: ₺300.000 (Mevcut: ₺180.000)`;
+
+    const defaultJulyMarkdown = `# 🎯 2026 Temmuz Finans & Bütçe Özeti
+
+## 💰 Gelirler
+### 💼 Maaş & Prim
+- Net Maaş: ₺85.000
+- Bayram İkramiyesi: ₺12.500
+
+## 💳 Kart Harcamaları
+### 🏖️ Tatil & Seyahat
+- Otel & Uçak Rezervasyonu: ₺32.000
+- Yeme İçme: ₺9.000
+### 🛒 Ev & Market
+- Süpermarket Harcamaları: ₺16.200
+
+## 🏦 Krediler
+### 📉 Taksitler
+- Konut Kredisi Taksiti: ₺18.450
+- İhtiyaç Kredisi Taksiti: ₺7.800
+
+## 🚀 Yatırımlar
+### 🥇 Birikim
+- Altın & Fon: ₺20.000`;
+
+    db.run(
+      'INSERT INTO mindmap_versions (year, month, month_str, title, content, theme, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [2026, 8, '2026-08', 'Ağustos 2026 Finans & Strateji Haritası', defaultMarkdown, 'modern', 'Ağustos ayı bütçe ve borç yönetim planı']
+    );
+    db.run(
+      'INSERT INTO mindmap_versions (year, month, month_str, title, content, theme, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [2026, 7, '2026-07', 'Temmuz 2026 Finans & Bütçe Özeti', defaultJulyMarkdown, 'emerald', 'Temmuz ayı tatil ve birikim haritası']
+    );
+  }
+
   // Admin kullanıcısını kontrol et / yoksa oluştur
   const userCheck = db.exec("SELECT id, email, password_hash FROM users WHERE email = '" + DEFAULT_ADMIN_EMAIL + "'");
   if (!userCheck.length || !userCheck[0].values.length) {

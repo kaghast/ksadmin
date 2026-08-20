@@ -24,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, onOpenM
         return { section: 'Finansal Yönetim', current: 'Kart Harcamaları & Kategori Dağılımı' };
       case 'kmh':
         return { section: 'Finansal Yönetim', current: 'KMH / Ek Hesaplar' };
+      case 'mindmap':
+        return { section: 'Strateji & Planlama', current: 'Zihin Haritası (Mindmap)' };
       case 'payments':
         return { section: 'Finansal Yönetim', current: 'Ödeme Geçmişi' };
       case 'settings':

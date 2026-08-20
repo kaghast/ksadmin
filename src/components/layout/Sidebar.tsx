@@ -10,11 +10,14 @@ import {
   Shield,
   Tags,
   PieChart,
-  ShoppingBag
+  ShoppingBag,
+  GitFork,
+  Network,
+  Workflow
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-export type ActiveTab = 'overview' | 'loans' | 'cards' | 'expenses' | 'kmh' | 'payments' | 'settings';
+export type ActiveTab = 'overview' | 'loans' | 'cards' | 'expenses' | 'kmh' | 'mindmap' | 'payments' | 'settings';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -115,6 +118,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onClo
           >
             <WalletCards className={`w-4 h-4 ${activeTab === 'kmh' ? 'text-blue-400' : 'text-slate-400'}`} />
             <span>KMH / Ek Hesaplar</span>
+          </button>
+          <button
+            onClick={() => handleSelectTab('mindmap')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+              activeTab === 'mindmap'
+                ? 'bg-slate-800 text-white shadow-sm font-semibold'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <Network className={`w-4 h-4 ${activeTab === 'mindmap' ? 'text-indigo-400' : 'text-slate-400'}`} />
+            <div className="flex items-center justify-between flex-1">
+              <span>Zihin Haritası</span>
+              <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-semibold px-1.5 py-0.5 rounded">Mindmap</span>
+            </div>
           </button>
           <button
             onClick={() => handleSelectTab('payments')}

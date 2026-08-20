@@ -121,6 +121,31 @@ export interface UpcomingPayment {
   details: string;
 }
 
+export interface MindmapVersion {
+  id: number;
+  year: number;
+  month: number; // 1-12
+  month_str: string; // 'YYYY-MM'
+  title: string;
+  content: string; // Markdown text
+  theme?: string;
+  is_active?: number;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface MindmapNode {
+  id: string;
+  text: string;
+  level: number; // 0 for root (H1), 1 for H2, 2 for H3, etc.
+  side?: 'left' | 'right' | 'root';
+  children: MindmapNode[];
+  isCollapsed?: boolean;
+  color?: string;
+  tag?: string;
+}
+
 export interface FinancialSummaryData {
   totalActiveDebt: number;
   totalMonthlyCommitment: number;

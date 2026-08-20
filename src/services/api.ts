@@ -8,7 +8,8 @@ import {
   FinancialSummaryData,
   UpcomingPayment,
   CardExpense,
-  ExpenseAnalytics
+  ExpenseAnalytics,
+  MindmapVersion
 } from '../types';
 
 const API_BASE = '/api';
@@ -277,6 +278,53 @@ export const api = {
 
   async deleteExpense(id: number): Promise<{ success: boolean; message: string }> {
     const res = await fetch(`${API_BASE}/financial/expenses/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  // Mindmap Versions & Hierarchy
+  async getMindmaps(params?: { year?: number; month?: number; month_str?: string }): Promise<{ mindmaps: MindmapVersion[] }> {
+    const query = new URLSearchParams();
+    if (params?.year) query.set('year', String(params.year));
+    if (params?.month) query.set('month', String(params.month));
+    if (params?.month_str) query.set('month_str', params.month_str);
+
+    const queryString = query.toString() ? `?${query.toString()}` : '';
+    const res = await fetch(`${API_BASE}/financial/mindmaps${queryString}`, {
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async getMindmapById(id: number): Promise<{ mindmap: MindmapVersion }> {
+    const res = await fetch(`${API_BASE}/financial/mindmaps/${id}`, {
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async createMindmap(data: Partial<MindmapVersion>): Promise<{ success: boolean; mindmap: MindmapVersion; message: string }> {
+    const res = await fetch(`${API_BASE}/financial/mindmaps`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async updateMindmap(id: number, data: Partial<MindmapVersion>): Promise<{ success: boolean; mindmap: MindmapVersion; message: string }> {
+    const res = await fetch(`${API_BASE}/financial/mindmaps/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async deleteMindmap(id: number): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/financial/mindmaps/${id}`, {
       method: 'DELETE',
       headers: getHeaders()
     });

@@ -10,7 +10,8 @@ import {
   CheckCircle2,
   ShieldAlert,
   ArrowRight,
-  Tags
+  Tags,
+  Network
 } from 'lucide-react';
 import { FinancialSummaryData, UpcomingPayment, Loan, CreditCard as CardType, KmhAccount } from '../../types';
 import { ActiveTab } from '../layout/Sidebar';
@@ -129,6 +130,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           >
             <Tags className="w-4 h-4" />
             <span>Kart Harcamaları</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('mindmap')}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-sm font-semibold shadow-sm transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Network className="w-4 h-4" />
+            <span>Zihin Haritası</span>
           </button>
         </div>
       </div>

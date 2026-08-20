@@ -9,6 +9,7 @@ import { LoansView } from './components/loans/LoansView';
 import { CreditCardsView } from './components/credit-cards/CreditCardsView';
 import { ExpensesView } from './components/expenses/ExpensesView';
 import { KmhView } from './components/kmh/KmhView';
+import { MindmapView } from './components/mindmap/MindmapView';
 import { PaymentsView } from './components/payments/PaymentsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { api } from './services/api';
@@ -294,6 +295,10 @@ function DashboardContent() {
                 isAddModalOpen={isAddKmhModalOpen}
                 setIsAddModalOpen={setIsAddKmhModalOpen}
               />
+            )}
+
+            {activeTab === 'mindmap' && (
+              <MindmapView showToast={showToast} />
             )}
 
             {activeTab === 'payments' && (

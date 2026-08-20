@@ -1182,10 +1182,11 @@ apiRouter.get('/financial/backup/export', authenticateToken, (req: Request, res:
     const bankDefinitions = queryAll('SELECT * FROM bank_definitions');
     const paymentRecords = queryAll('SELECT * FROM payment_records');
     const cardExpenses = queryAll('SELECT * FROM card_expenses');
+    const mindmapVersions = queryAll('SELECT * FROM mindmap_versions');
     const appSettings = queryAll('SELECT * FROM app_settings');
 
     const backupData = {
-      version: '1.1.0',
+      version: '1.2.0',
       exportedAt: new Date().toISOString(),
       appName: 'KSADMIN',
       data: {
@@ -1196,6 +1197,7 @@ apiRouter.get('/financial/backup/export', authenticateToken, (req: Request, res:
         bankDefinitions,
         paymentRecords,
         cardExpenses,
+        mindmapVersions,
         appSettings
       }
     };
@@ -1223,6 +1225,7 @@ apiRouter.post('/financial/backup/import', authenticateToken, (req: Request, res
       bankDefinitions = [],
       paymentRecords = [],
       cardExpenses = [],
+      mindmapVersions = [],
       appSettings = []
     } = backupData.data;
 
@@ -1233,6 +1236,7 @@ apiRouter.post('/financial/backup/import', authenticateToken, (req: Request, res
       execute('DELETE FROM kmh_accounts');
       execute('DELETE FROM payment_records');
       execute('DELETE FROM card_expenses');
+      execute('DELETE FROM mindmap_versions');
       if (bankDefinitions.length > 0) {
         execute('DELETE FROM bank_definitions');
       }
@@ -1388,18 +1392,204 @@ apiRouter.post('/financial/backup/import', authenticateToken, (req: Request, res
       }
     }
 
+    // Import Mindmap Versions
+    let importedMindmapsCount = 0;
+    if (Array.isArray(mindmapVersions)) {
+      for (const m of mindmapVersions) {
+        execute(
+          `INSERT INTO mindmap_versions (
+            year, month, month_str, title, content, theme, is_active, notes, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            m.year || 2026,
+            m.month || 1,
+            m.month_str || `${m.year || 2026}-${String(m.month || 1).padStart(2, '0')}`,
+            m.title || 'Zihin Haritası',
+            m.content || '',
+            m.theme || 'modern',
+            m.is_active !== undefined ? m.is_active : 1,
+            m.notes || '',
+            m.created_at || new Date().toISOString(),
+            m.updated_at || new Date().toISOString()
+          ]
+        );
+        importedMindmapsCount++;
+      }
+    }
+
     return res.json({
       success: true,
-      message: `Yedek başarıyla yüklendi (${importedLoansCount} kredi, ${importedCardsCount} kredi kartı, ${importedKmhCount} KMH, ${importedExpensesCount} harcama kaydı, ${importedPaymentsCount} ödeme kaydı).`,
+      message: `Yedek başarıyla yüklendi (${importedLoansCount} kredi, ${importedCardsCount} kredi kartı, ${importedKmhCount} KMH, ${importedExpensesCount} harcama kaydı, ${importedMindmapsCount} zihin haritası versiyonu, ${importedPaymentsCount} ödeme kaydı).`,
       counts: {
         loans: importedLoansCount,
         creditCards: importedCardsCount,
         kmhAccounts: importedKmhCount,
         cardExpenses: importedExpensesCount,
+        mindmapVersions: importedMindmapsCount,
         paymentRecords: importedPaymentsCount
       }
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'Yedek içeri aktarılamadı: ' + err.message });
+  }
+});
+
+// ----------------------------------------------------
+// MINDMAP VERSIONS & HIERARCHY API ROUTES
+// ----------------------------------------------------
+
+// List all mindmap versions (optionally filter by year/month)
+apiRouter.get('/financial/mindmaps', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { year, month, month_str } = req.query;
+    let sql = 'SELECT * FROM mindmap_versions WHERE 1=1';
+    const params: any[] = [];
+
+    if (year) {
+      sql += ' AND year = ?';
+      params.push(Number(year));
+    }
+    if (month) {
+      sql += ' AND month = ?';
+      params.push(Number(month));
+    }
+    if (month_str) {
+      sql += ' AND month_str = ?';
+      params.push(String(month_str));
+    }
+
+    sql += ' ORDER BY year DESC, month DESC, updated_at DESC, id DESC';
+    const mindmaps = queryAll(sql, params);
+    return res.json({ mindmaps });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Get a specific mindmap version by ID
+apiRouter.get('/financial/mindmaps/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const mindmap = queryOne('SELECT * FROM mindmap_versions WHERE id = ?', [id]);
+    if (!mindmap) {
+      return res.status(404).json({ error: 'Zihin haritası versiyonu bulunamadı.' });
+    }
+    return res.json({ mindmap });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Create a new mindmap version / snapshot
+apiRouter.post('/financial/mindmaps', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { year, month, month_str, title, content, theme, notes } = req.body;
+
+    if (!content) {
+      return res.status(400).json({ error: 'Lütfen zihin haritası için Markdown içeriği sağlayınız.' });
+    }
+
+    const currentYear = year ? Number(year) : new Date().getFullYear();
+    const currentMonth = month ? Number(month) : new Date().getMonth() + 1;
+    const computedMonthStr = month_str || `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+    const cleanTitle = title?.trim() || `${computedMonthStr} Zihin Haritası`;
+
+    const { lastInsertId } = execute(
+      `INSERT INTO mindmap_versions (
+        year, month, month_str, title, content, theme, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        currentYear,
+        currentMonth,
+        computedMonthStr,
+        cleanTitle,
+        content,
+        theme || 'modern',
+        notes || ''
+      ]
+    );
+
+    const created = queryOne('SELECT * FROM mindmap_versions WHERE id = ?', [lastInsertId]);
+    return res.status(201).json({
+      success: true,
+      message: 'Zihin haritası versiyonu başarıyla oluşturuldu.',
+      mindmap: created
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Update an existing mindmap version
+apiRouter.put('/financial/mindmaps/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM mindmap_versions WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Zihin haritası versiyonu bulunamadı.' });
+    }
+
+    const { title, content, theme, notes, year, month, month_str } = req.body;
+
+    const updatedYear = year !== undefined ? Number(year) : existing.year;
+    const updatedMonth = month !== undefined ? Number(month) : existing.month;
+    const updatedMonthStr = month_str || `${updatedYear}-${String(updatedMonth).padStart(2, '0')}`;
+
+    execute(
+      `UPDATE mindmap_versions SET
+        year = ?,
+        month = ?,
+        month_str = ?,
+        title = ?,
+        content = ?,
+        theme = ?,
+        notes = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?`,
+      [
+        updatedYear,
+        updatedMonth,
+        updatedMonthStr,
+        title !== undefined ? title.trim() : existing.title,
+        content !== undefined ? content : existing.content,
+        theme !== undefined ? theme : existing.theme,
+        notes !== undefined ? notes : existing.notes,
+        id
+      ]
+    );
+
+    const updated = queryOne('SELECT * FROM mindmap_versions WHERE id = ?', [id]);
+    return res.json({
+      success: true,
+      message: 'Zihin haritası başarıyla güncellendi.',
+      mindmap: updated
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a mindmap version
+apiRouter.delete('/financial/mindmaps/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM mindmap_versions WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Zihin haritası bulunamadı.' });
+    }
+
+    // Check count to prevent deleting if only 1 version exists
+    const totalCountRes = queryOne('SELECT COUNT(*) as count FROM mindmap_versions');
+    if (totalCountRes && totalCountRes.count <= 1) {
+      return res.status(400).json({ error: 'Sistemdeki tek zihin haritası versiyonu silinemez. Yeni bir versiyon oluşturup silebilirsiniz.' });
+    }
+
+    execute('DELETE FROM mindmap_versions WHERE id = ?', [id]);
+    return res.json({
+      success: true,
+      message: 'Zihin haritası versiyonu başarıyla silindi.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
   }
 });
