@@ -25,7 +25,9 @@ import {
   History,
   AlertCircle,
   CheckCircle2,
-  X
+  X,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { MindmapVersion } from '../../types';
 import { api } from '../../services/api';
@@ -74,6 +76,7 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
 
   // Mobile / tablet sub-tab switcher for responsive view
   const [mobileTab, setMobileTab] = useState<'editor' | 'mindmap' | 'versions'>('mindmap');
+  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
@@ -550,13 +553,41 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
               <Layers className="w-4 h-4 text-indigo-600" />
               <span className="text-xs font-bold text-slate-800">2. İnteraktif Zihin Haritası</span>
             </div>
-            <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-              Ortadan Dağılım (Radial)
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 hidden sm:inline-block">
+                Ortadan Dağılım (Radial)
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsCanvasFullscreen((prev) => !prev)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer ${
+                  isCanvasFullscreen
+                    ? 'bg-slate-900 text-white hover:bg-slate-800'
+                    : 'bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300'
+                }`}
+                title={isCanvasFullscreen ? 'Tam Ekrandan Çık (ESC)' : 'Mindmap Tam Ekran Görünümü'}
+              >
+                {isCanvasFullscreen ? (
+                  <>
+                    <Minimize2 className="w-3.5 h-3.5" />
+                    <span>Küçült</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>Tam Ekran</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 min-h-0 p-2 relative">
-            <MindmapCanvas markdown={markdownContent} />
+            <MindmapCanvas
+              markdown={markdownContent}
+              isFullscreenControlled={isCanvasFullscreen}
+              onFullscreenChange={setIsCanvasFullscreen}
+            />
           </div>
         </div>
 

@@ -28,13 +28,17 @@ interface MindmapCanvasProps {
   theme?: string;
   onNodeClick?: (text: string) => void;
   className?: string;
+  isFullscreenControlled?: boolean;
+  onFullscreenChange?: (isFullscreen: boolean) => void;
 }
 
 export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
   markdown,
   theme = 'modern',
   onNodeClick,
-  className = ''
+  className = '',
+  isFullscreenControlled,
+  onFullscreenChange
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -43,7 +47,16 @@ export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.95 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [internalFullscreen, setInternalFullscreen] = useState(false);
+
+  const isFullscreen = isFullscreenControlled !== undefined ? isFullscreenControlled : internalFullscreen;
+
+  const setFullscreenState = (val: boolean) => {
+    setInternalFullscreen(val);
+    if (onFullscreenChange) {
+      onFullscreenChange(val);
+    }
+  };
 
   // Collapsed nodes state (map nodeId -> boolean)
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
@@ -64,23 +77,42 @@ export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
     if (clientWidth === 0 || clientHeight === 0) return;
 
     const { width, height } = layout.bounds;
-    const padding = 80;
+    const padding = isFullscreen ? 120 : 80;
 
     const scaleX = (clientWidth - padding) / width;
     const scaleY = (clientHeight - padding) / height;
-    const fitScale = Math.min(1.2, Math.max(0.4, Math.min(scaleX, scaleY)));
+    const fitScale = Math.min(1.25, Math.max(0.4, Math.min(scaleX, scaleY)));
 
     setTransform({
       x: clientWidth / 2,
       y: clientHeight / 2,
       scale: fitScale
     });
-  }, [layout.bounds]);
+  }, [layout.bounds, isFullscreen]);
 
   // Initial fit on mount & when markdown structural bounds change substantially
   useEffect(() => {
     fitToView();
   }, [markdown]);
+
+  // When fullscreen state changes, auto-fit view to new container dimensions
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fitToView();
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [isFullscreen, fitToView]);
+
+  // ESC key listener to exit fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setFullscreenState(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
 
   // Mouse wheel zoom
   const handleWheel = (e: React.WheelEvent) => {
@@ -148,7 +180,7 @@ export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
   };
 
   const toggleFullscreen = () => {
-    setIsFullscreen(!isFullscreen);
+    setFullscreenState(!isFullscreen);
   };
 
   // Export as SVG file
@@ -273,12 +305,28 @@ export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
             <span className="hidden sm:inline">SVG</span>
           </button>
 
+          <div className="w-px h-4 bg-slate-200 mx-0.5" />
+
           <button
             onClick={toggleFullscreen}
-            className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-            title={isFullscreen ? 'Tam Ekrandan Çık' : 'Tam Ekran'}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+              isFullscreen
+                ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-sm'
+                : 'text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100/90 border border-indigo-200/80'
+            }`}
+            title={isFullscreen ? 'Tam Ekrandan Çık (ESC)' : 'Tam Ekran Görünümü'}
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" />
+                <span className="font-medium">Küçült (ESC)</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" />
+                <span>Tam Ekran</span>
+              </>
+            )}
           </button>
         </div>
       </div>
