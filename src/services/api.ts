@@ -9,7 +9,12 @@ import {
   UpcomingPayment,
   CardExpense,
   ExpenseAnalytics,
-  MindmapVersion
+  MindmapVersion,
+  UrlMonitorCategory,
+  UrlMonitoredItem,
+  UrlMonitorHistoryItem,
+  UrlMonitorStats,
+  DiffLine
 } from '../types';
 
 const API_BASE = '/api';
@@ -377,5 +382,177 @@ export const api = {
       body: JSON.stringify({ backupData, mode })
     });
     return handleResponse(res);
+  },
+
+  // ==========================================
+  // URL MONITOR & WEB TRACKER CLIENT METHODS
+  // ==========================================
+
+  async getUrlCategories(): Promise<{ success: boolean; categories: UrlMonitorCategory[] }> {
+    const res = await fetch(`${API_BASE}/url-monitor/categories`, {
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async createUrlCategory(data: { name: string; color?: string; icon?: string }): Promise<{ success: boolean; category: UrlMonitorCategory }> {
+    const res = await fetch(`${API_BASE}/url-monitor/categories`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async updateUrlCategory(id: number, data: { name?: string; color?: string; icon?: string }): Promise<{ success: boolean; category: UrlMonitorCategory }> {
+    const res = await fetch(`${API_BASE}/url-monitor/categories/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async deleteUrlCategory(id: number): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/url-monitor/categories/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async getUrlMonitoredItems(params?: { category_id?: string | number; has_changes?: string | boolean; search?: string }): Promise<{
+    success: boolean;
+    items: UrlMonitoredItem[];
+    stats: UrlMonitorStats;
+  }> {
+    const query = new URLSearchParams();
+    if (params?.category_id !== undefined) query.append('category_id', String(params.category_id));
+    if (params?.has_changes !== undefined) query.append('has_changes', String(params.has_changes));
+    if (params?.search) query.append('search', params.search);
+
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    const res = await fetch(`${API_BASE}/url-monitor/items${qs}`, {
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async getUrlMonitoredItemById(id: number): Promise<{
+    success: boolean;
+    item: UrlMonitoredItem;
+    history: UrlMonitorHistoryItem[];
+    baselineDiff: {
+      hasChanged: boolean;
+      diffLines: DiffLine[];
+      summary: string;
+      addedCount: number;
+      removedCount: number;
+      unchangedCount: number;
+      changePercentage: number;
+    };
+  }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}`, {
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async testFetchUrl(url: string): Promise<{
+    success: boolean;
+    snapshot: {
+      success: boolean;
+      httpStatus: number;
+      title: string;
+      text: string;
+      hash: string;
+      error?: string;
+    };
+  }> {
+    const res = await fetch(`${API_BASE}/url-monitor/test-fetch`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ url })
+    });
+    return handleResponse(res);
+  },
+
+  async createUrlMonitoredItem(data: {
+    category_id?: number | null;
+    title?: string;
+    url: string;
+    check_interval_hours?: number;
+    notes?: string;
+    initial_content?: string;
+  }): Promise<{ success: boolean; message: string; item: UrlMonitoredItem }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async updateUrlMonitoredItem(id: number, data: Partial<UrlMonitoredItem>): Promise<{ success: boolean; message: string; item: UrlMonitoredItem }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(data)
+    });
+    return handleResponse(res);
+  },
+
+  async deleteUrlMonitoredItem(id: number): Promise<{ success: boolean; message: string }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async checkUrlItemNow(id: number): Promise<{
+    success: boolean;
+    message: string;
+    item: UrlMonitoredItem;
+    history: UrlMonitorHistoryItem[];
+    baselineDiff: {
+      hasChanged: boolean;
+      diffLines: DiffLine[];
+      summary: string;
+      addedCount: number;
+      removedCount: number;
+      unchangedCount: number;
+      changePercentage: number;
+    };
+    error?: string;
+  }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}/check`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async checkAllUrlItems(): Promise<{ success: boolean; message: string; checkedCount: number; changedCount: number }> {
+    const res = await fetch(`${API_BASE}/url-monitor/check-all`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async acknowledgeUrlChanges(id: number): Promise<{
+    success: boolean;
+    message: string;
+    item: UrlMonitoredItem;
+    history: UrlMonitorHistoryItem[];
+    baselineDiff: any;
+  }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}/acknowledge`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
   }
 };
+

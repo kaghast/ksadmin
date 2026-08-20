@@ -198,6 +198,318 @@ function initSchema(db: Database) {
     );
   `);
 
+  // URL Takip Kategorileri Tablosu
+  db.run(`
+    CREATE TABLE IF NOT EXISTS url_monitor_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      color TEXT DEFAULT '#2563eb',
+      icon TEXT DEFAULT 'Globe',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // URL Takip Öğeleri Tablosu
+  db.run(`
+    CREATE TABLE IF NOT EXISTS url_monitored_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      selector TEXT,
+      check_interval_hours INTEGER DEFAULT 24,
+      last_checked_at DATETIME,
+      last_changed_at DATETIME,
+      has_changes INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      http_status INTEGER DEFAULT 200,
+      initial_snapshot_content TEXT,
+      last_snapshot_content TEXT,
+      content_hash TEXT,
+      change_summary TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (category_id) REFERENCES url_monitor_categories (id) ON DELETE SET NULL
+    );
+  `);
+
+  // URL Değişiklik ve Snapshot Geçmişi Tablosu
+  db.run(`
+    CREATE TABLE IF NOT EXISTS url_monitor_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL,
+      checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      http_status INTEGER DEFAULT 200,
+      has_changed INTEGER DEFAULT 0,
+      previous_content TEXT,
+      current_content TEXT,
+      content_hash TEXT,
+      diff_summary TEXT,
+      diff_details TEXT,
+      change_type TEXT DEFAULT 'unchanged',
+      notes TEXT,
+      FOREIGN KEY (item_id) REFERENCES url_monitored_items (id) ON DELETE CASCADE
+    );
+  `);
+
+  // Initial Seed for URL Monitor Categories if empty
+  const urlCategoryCheck = db.exec("SELECT id FROM url_monitor_categories LIMIT 1");
+  if (!urlCategoryCheck.length || !urlCategoryCheck[0].values.length) {
+    const defaultCategories = [
+      { name: 'Finans & Bankacılık', color: '#2563eb', icon: 'Landmark' },
+      { name: 'E-Ticaret & Fiyat Takibi', color: '#16a34a', icon: 'ShoppingCart' },
+      { name: 'Resmi Kurum & Mevzuat', color: '#7c3aed', icon: 'Scale' },
+      { name: 'Haber & Bülten', color: '#ea580c', icon: 'Newspaper' },
+      { name: 'Teknoloji & Yazılım', color: '#0891b2', icon: 'Code' }
+    ];
+
+    for (const cat of defaultCategories) {
+      db.run('INSERT INTO url_monitor_categories (name, color, icon) VALUES (?, ?, ?)', [cat.name, cat.color, cat.icon]);
+    }
+  }
+
+  // Initial Seed for URL Monitored Items if empty
+  const urlItemCheck = db.exec("SELECT id FROM url_monitored_items LIMIT 1");
+  if (!urlItemCheck.length || !urlItemCheck[0].values.length) {
+    const catRows = queryAll<{ id: number; name: string }>('SELECT id, name FROM url_monitor_categories');
+    const finCat = catRows.find(c => c.name.includes('Finans'))?.id || 1;
+    const mevzuatCat = catRows.find(c => c.name.includes('Mevzuat'))?.id || 3;
+    const ecomCat = catRows.find(c => c.name.includes('Ticaret'))?.id || 2;
+
+    const initialTcmbContent = `Türkiye Cumhuriyet Merkez Bankası (TCMB)
+Para Politikası Kurulu (PPK) Faiz Kararları
+Giriş Tarihi: 01.08.2026
+
+1. Politika Faizi (1 Hafta Vadeli Repo İhale Faiz Oranı): %47.50
+2. Gecelik Borçlanma Faizi: %46.00
+3. Gecelik Borç Verme Faizi: %50.50
+4. Geç Likidite Penceresi Borç Verme Faizi: %53.50
+
+Karar Özeti:
+Kurul, enflasyonun ana eğiliminde belirgin ve kalıcı bir düşüş sağlanana kadar sıkı para politikası duruşunun sürdürüleceğini belirtmiştir.`;
+
+    const updatedTcmbContent = `Türkiye Cumhuriyet Merkez Bankası (TCMB)
+Para Politikası Kurulu (PPK) Faiz Kararları
+Giriş Tarihi: 18.08.2026 (Yeni Karar)
+
+1. Politika Faizi (1 Hafta Vadeli Repo İhale Faiz Oranı): %45.00
+2. Gecelik Borçlanma Faizi: %43.50
+3. Gecelik Borç Verme Faizi: %48.00
+4. Geç Likidite Penceresi Borç Verme Faizi: %51.00
+
+Karar Özeti:
+Kurul, aylık enflasyon göstergelerindeki iyileşme doğrultusunda politika faizinde 250 baz puan indirime gidilmesine karar vermiştir.`;
+
+    const diffJsonTcmb = JSON.stringify([
+      { type: 'unchanged', text: 'Türkiye Cumhuriyet Merkez Bankası (TCMB)' },
+      { type: 'unchanged', text: 'Para Politikası Kurulu (PPK) Faiz Kararları' },
+      { type: 'removed', text: 'Giriş Tarihi: 01.08.2026' },
+      { type: 'added', text: 'Giriş Tarihi: 18.08.2026 (Yeni Karar)' },
+      { type: 'unchanged', text: '' },
+      { type: 'removed', text: '1. Politika Faizi (1 Hafta Vadeli Repo İhale Faiz Oranı): %47.50' },
+      { type: 'removed', text: '2. Gecelik Borçlanma Faizi: %46.00' },
+      { type: 'removed', text: '3. Gecelik Borç Verme Faizi: %50.50' },
+      { type: 'removed', text: '4. Geç Likidite Penceresi Borç Verme Faizi: %53.50' },
+      { type: 'added', text: '1. Politika Faizi (1 Hafta Vadeli Repo İhale Faiz Oranı): %45.00' },
+      { type: 'added', text: '2. Gecelik Borçlanma Faizi: %43.50' },
+      { type: 'added', text: '3. Gecelik Borç Verme Faizi: %48.00' },
+      { type: 'added', text: '4. Geç Likidite Penceresi Borç Verme Faizi: %51.00' },
+      { type: 'unchanged', text: '' },
+      { type: 'unchanged', text: 'Karar Özeti:' },
+      { type: 'removed', text: 'Kurul, enflasyonun ana eğiliminde belirgin ve kalıcı bir düşüş sağlanana kadar sıkı para politikası duruşunun sürdürüleceğini belirtmiştir.' },
+      { type: 'added', text: 'Kurul, aylık enflasyon göstergelerindeki iyileşme doğrultusunda politika faizinde 250 baz puan indirime gidilmesine karar vermiştir.' }
+    ]);
+
+    // Item 1: TCMB
+    db.run(`
+      INSERT INTO url_monitored_items (
+        category_id, title, url, check_interval_hours, last_checked_at, last_changed_at,
+        has_changes, status, http_status, initial_snapshot_content, last_snapshot_content,
+        change_summary, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      finCat,
+      'TCMB Politika Faiz Oranları & PPK Kararı',
+      'https://www.tcmb.gov.tr/wps/wcm/connect/tr/tcmb+tr/main+menu/temel+faaliyetler/para+politikasi/faizler',
+      12,
+      '2026-08-20 09:15:00',
+      '2026-08-18 14:00:00',
+      1,
+      'active',
+      200,
+      initialTcmbContent,
+      updatedTcmbContent,
+      '+6 satır eklendi, -6 satır silindi (Faiz oranları değişti)',
+      'Aylık PPK toplantı kararları takibi'
+    ]);
+
+    const tcmbItemId = (db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as number) || 1;
+
+    // History 1: Baseline
+    db.run(`
+      INSERT INTO url_monitor_history (item_id, checked_at, http_status, has_changed, previous_content, current_content, diff_summary, diff_details, change_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      tcmbItemId,
+      '2026-08-01 10:00:00',
+      200,
+      0,
+      '',
+      initialTcmbContent,
+      'İlk kayıt oluşturuldu (Referans Baseline)',
+      '[]',
+      'initial'
+    ]);
+
+    // History 2: Change detected
+    db.run(`
+      INSERT INTO url_monitor_history (item_id, checked_at, http_status, has_changed, previous_content, current_content, diff_summary, diff_details, change_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      tcmbItemId,
+      '2026-08-18 14:00:00',
+      200,
+      1,
+      initialTcmbContent,
+      updatedTcmbContent,
+      'Faiz indirimi ve karar metni değişikliği tespit edildi (+6 / -6 satır)',
+      diffJsonTcmb,
+      'changed'
+    ]);
+
+    // Item 2: Resmi Gazete
+    const resmigazeteContent = `T.C. Resmi Gazete
+Kuruluş: 7 Ekim 1920
+Sayı: 33412 - 20 Ağustos 2026 Perşembe
+
+YÜRÜTME VE İDARE BÖLÜMÜ
+YÖNETMELİKLER
+–– Bankacılık Düzenleme ve Denetleme Kurumu Yönetmeliğinde Değişiklik Yapılmasına Dair Yönetmelik
+–– Sermaye Piyasası Kurulu Yatırım Hizmetleri Tebliği (III-37.1) Güncellemesi
+
+İLÂNLAR
+a - Yargı İlânları
+b - Artırma, Eksiltme ve İhale İlânları
+c - Çeşitli İlânlar`;
+
+    db.run(`
+      INSERT INTO url_monitored_items (
+        category_id, title, url, check_interval_hours, last_checked_at, last_changed_at,
+        has_changes, status, http_status, initial_snapshot_content, last_snapshot_content,
+        change_summary, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      mevzuatCat,
+      'T.C. Resmi Gazete - Günlük Sayı',
+      'https://www.resmigazete.gov.tr',
+      6,
+      '2026-08-20 06:30:00',
+      '2026-08-20 06:30:00',
+      0,
+      'active',
+      200,
+      resmigazeteContent,
+      resmigazeteContent,
+      'Son kontrolde değişiklik tespit edilmedi (Güncel)',
+      'Günlük mevzuat ve tebliğ takibi'
+    ]);
+
+    const rgItemId = (db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as number) || 2;
+
+    db.run(`
+      INSERT INTO url_monitor_history (item_id, checked_at, http_status, has_changed, previous_content, current_content, diff_summary, diff_details, change_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      rgItemId,
+      '2026-08-20 06:30:00',
+      200,
+      0,
+      resmigazeteContent,
+      resmigazeteContent,
+      'İlk kayıt oluşturuldu',
+      '[]',
+      'initial'
+    ]);
+
+    // Item 3: Apple MacBook Fiyat Takibi
+    const initialAppleContent = `Apple Türkiye - MacBook Pro 14 inç
+M4 Pro Çip, 24 GB Birleşik Bellek, 512 GB SSD
+Fiyat: 84.999,00 TL
+Stok Durumu: Hemen Teslim (1-2 iş günü)
+Ücretsiz Kargo ve 14 Gün İade Garantisi`;
+
+    const updatedAppleContent = `Apple Türkiye - MacBook Pro 14 inç
+M4 Pro Çip, 24 GB Birleşik Bellek, 512 GB SSD
+Fiyat: 89.999,00 TL (Fiyat Güncellendi)
+Stok Durumu: Hemen Teslim (1-2 iş günü)
+Ücretsiz Kargo ve 14 Gün İade Garantisi`;
+
+    const diffJsonApple = JSON.stringify([
+      { type: 'unchanged', text: 'Apple Türkiye - MacBook Pro 14 inç' },
+      { type: 'unchanged', text: 'M4 Pro Çip, 24 GB Birleşik Bellek, 512 GB SSD' },
+      { type: 'removed', text: 'Fiyat: 84.999,00 TL' },
+      { type: 'added', text: 'Fiyat: 89.999,00 TL (Fiyat Güncellendi)' },
+      { type: 'unchanged', text: 'Stok Durumu: Hemen Teslim (1-2 iş günü)' },
+      { type: 'unchanged', text: 'Ücretsiz Kargo ve 14 Gün İade Garantisi' }
+    ]);
+
+    db.run(`
+      INSERT INTO url_monitored_items (
+        category_id, title, url, check_interval_hours, last_checked_at, last_changed_at,
+        has_changes, status, http_status, initial_snapshot_content, last_snapshot_content,
+        change_summary, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      ecomCat,
+      'Apple MacBook Pro 14" M4 Pro Fiyatı',
+      'https://www.apple.com/tr/shop/buy-mac/macbook-pro',
+      24,
+      '2026-08-19 18:45:00',
+      '2026-08-19 18:45:00',
+      1,
+      'active',
+      200,
+      initialAppleContent,
+      updatedAppleContent,
+      '+1 satır / -1 satır (Fiyat: 84.999 TL → 89.999 TL)',
+      'Ekipman yenileme bütçe takibi'
+    ]);
+
+    const appleItemId = (db.exec('SELECT last_insert_rowid() as id')[0]?.values[0]?.[0] as number) || 3;
+
+    db.run(`
+      INSERT INTO url_monitor_history (item_id, checked_at, http_status, has_changed, previous_content, current_content, diff_summary, diff_details, change_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      appleItemId,
+      '2026-08-10 12:00:00',
+      200,
+      0,
+      '',
+      initialAppleContent,
+      'İlk kayıt oluşturuldu',
+      '[]',
+      'initial'
+    ]);
+
+    db.run(`
+      INSERT INTO url_monitor_history (item_id, checked_at, http_status, has_changed, previous_content, current_content, diff_summary, diff_details, change_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      appleItemId,
+      '2026-08-19 18:45:00',
+      200,
+      1,
+      initialAppleContent,
+      updatedAppleContent,
+      'Fiyat değişikliği tespit edildi (84.999 TL -> 89.999 TL)',
+      diffJsonApple,
+      'changed'
+    ]);
+  }
+
+
   // Initial Seed for Mindmap if empty
   const mindmapCheck = db.exec("SELECT id FROM mindmap_versions LIMIT 1");
   if (!mindmapCheck.length || !mindmapCheck[0].values.length) {

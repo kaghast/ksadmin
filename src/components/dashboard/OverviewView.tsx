@@ -11,7 +11,8 @@ import {
   ShieldAlert,
   ArrowRight,
   Tags,
-  Network
+  Network,
+  Globe
 } from 'lucide-react';
 import { FinancialSummaryData, UpcomingPayment, Loan, CreditCard as CardType, KmhAccount } from '../../types';
 import { ActiveTab } from '../layout/Sidebar';
@@ -137,6 +138,13 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           >
             <Network className="w-4 h-4" />
             <span>Zihin Haritası</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('url-monitor')}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-sm font-semibold shadow-sm transition-all whitespace-nowrap cursor-pointer"
+          >
+            <Globe className="w-4 h-4" />
+            <span>Web / URL Takip</span>
           </button>
         </div>
       </div>

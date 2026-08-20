@@ -13,11 +13,12 @@ import {
   ShoppingBag,
   GitFork,
   Network,
-  Workflow
+  Workflow,
+  Globe
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
-export type ActiveTab = 'overview' | 'loans' | 'cards' | 'expenses' | 'kmh' | 'mindmap' | 'payments' | 'settings';
+export type ActiveTab = 'overview' | 'loans' | 'cards' | 'expenses' | 'kmh' | 'mindmap' | 'url-monitor' | 'payments' | 'settings';
 
 interface SidebarProps {
   activeTab: ActiveTab;
@@ -131,6 +132,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onClo
             <div className="flex items-center justify-between flex-1">
               <span>Zihin Haritası</span>
               <span className="text-[10px] bg-indigo-500/20 text-indigo-300 font-semibold px-1.5 py-0.5 rounded">Mindmap</span>
+            </div>
+          </button>
+          <button
+            onClick={() => handleSelectTab('url-monitor')}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${
+              activeTab === 'url-monitor'
+                ? 'bg-slate-800 text-white shadow-sm font-semibold'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+            }`}
+          >
+            <Globe className={`w-4 h-4 ${activeTab === 'url-monitor' ? 'text-blue-400' : 'text-slate-400'}`} />
+            <div className="flex items-center justify-between flex-1">
+              <span>Web / URL Takip</span>
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 font-semibold px-1.5 py-0.5 rounded">Canlı</span>
             </div>
           </button>
           <button

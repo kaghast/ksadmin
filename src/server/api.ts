@@ -1593,3 +1593,689 @@ apiRouter.delete('/financial/mindmaps/:id', authenticateToken, (req: Request, re
     return res.status(500).json({ error: err.message });
   }
 });
+
+// ----------------------------------------------------
+// URL MONITOR & WEB TRACKER API ROUTES
+// ----------------------------------------------------
+import { fetchUrlSnapshot, computeTextDiff, computeHash } from './urlMonitorUtils';
+
+// 1. Get all categories
+apiRouter.get('/url-monitor/categories', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const categories = queryAll(`
+      SELECT 
+        c.*,
+        COUNT(i.id) as item_count
+      FROM url_monitor_categories c
+      LEFT JOIN url_monitored_items i ON i.category_id = c.id
+      GROUP BY c.id
+      ORDER BY c.name ASC
+    `);
+    return res.json({ success: true, categories });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Create category
+apiRouter.post('/url-monitor/categories', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { name, color, icon } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Kategori adı zorunludur.' });
+    }
+
+    const cleanName = name.trim();
+    const existing = queryOne('SELECT id FROM url_monitor_categories WHERE name = ?', [cleanName]);
+    if (existing) {
+      return res.status(400).json({ error: 'Bu isimde bir kategori zaten mevcut.' });
+    }
+
+    const { lastInsertId } = execute(
+      'INSERT INTO url_monitor_categories (name, color, icon) VALUES (?, ?, ?)',
+      [cleanName, color || '#2563eb', icon || 'Globe']
+    );
+
+    const created = queryOne('SELECT * FROM url_monitor_categories WHERE id = ?', [lastInsertId]);
+    return res.status(201).json({ success: true, category: created });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Update category
+apiRouter.put('/url-monitor/categories/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, color, icon } = req.body;
+    const existing = queryOne('SELECT * FROM url_monitor_categories WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Kategori bulunamadı.' });
+    }
+
+    const cleanName = name ? name.trim() : existing.name;
+    execute(
+      'UPDATE url_monitor_categories SET name = ?, color = ?, icon = ? WHERE id = ?',
+      [cleanName, color || existing.color, icon || existing.icon, id]
+    );
+
+    const updated = queryOne('SELECT * FROM url_monitor_categories WHERE id = ?', [id]);
+    return res.json({ success: true, category: updated });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Delete category
+apiRouter.delete('/url-monitor/categories/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM url_monitor_categories WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Kategori bulunamadı.' });
+    }
+
+    // Check if category has items
+    const countRes = queryOne('SELECT COUNT(*) as count FROM url_monitored_items WHERE category_id = ?', [id]);
+    if (countRes && countRes.count > 0) {
+      // Unlink items from category instead of failing
+      execute('UPDATE url_monitored_items SET category_id = NULL WHERE category_id = ?', [id]);
+    }
+
+    execute('DELETE FROM url_monitor_categories WHERE id = ?', [id]);
+    return res.json({ success: true, message: 'Kategori başarıyla silindi.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Get all monitored items with category info and filters
+apiRouter.get('/url-monitor/items', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { category_id, has_changes, search } = req.query;
+
+    let sql = `
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color,
+        (SELECT COUNT(*) FROM url_monitor_history h WHERE h.item_id = i.id) as history_count
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (category_id !== undefined && category_id !== '' && category_id !== 'all') {
+      if (category_id === 'uncategorized') {
+        sql += ' AND i.category_id IS NULL';
+      } else {
+        sql += ' AND i.category_id = ?';
+        params.push(Number(category_id));
+      }
+    }
+
+    if (has_changes === '1' || has_changes === 'true') {
+      sql += ' AND i.has_changes = 1';
+    } else if (has_changes === '0' || has_changes === 'false') {
+      sql += ' AND i.has_changes = 0';
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      sql += ' AND (i.title LIKE ? OR i.url LIKE ? OR i.notes LIKE ?)';
+      const term = `%${search.trim()}%`;
+      params.push(term, term, term);
+    }
+
+    sql += ' ORDER BY i.has_changes DESC, i.updated_at DESC';
+
+    const items = queryAll(sql, params);
+
+    // Calculate stats
+    const allItems = queryAll('SELECT id, has_changes, last_checked_at FROM url_monitored_items');
+    const totalItems = allItems.length;
+    const changedItemsCount = allItems.filter(i => i.has_changes === 1).length;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const checkedTodayCount = allItems.filter(i => i.last_checked_at && i.last_checked_at.startsWith(todayStr)).length;
+    const catCountRes = queryOne('SELECT COUNT(*) as count FROM url_monitor_categories');
+
+    return res.json({
+      success: true,
+      items,
+      stats: {
+        totalItems,
+        changedItemsCount,
+        checkedTodayCount,
+        categoriesCount: catCountRes?.count || 0
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Test fetch preview without saving
+apiRouter.post('/url-monitor/test-fetch', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const { url } = req.body;
+    if (!url || !url.trim()) {
+      return res.status(400).json({ error: 'URL adresi zorunludur.' });
+    }
+
+    const snapshot = await fetchUrlSnapshot(url.trim());
+    return res.json({ success: true, snapshot });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 7. Create monitored URL item (with immediate live snapshot fetch)
+apiRouter.post('/url-monitor/items', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const { category_id, title, url, check_interval_hours, notes, initial_content } = req.body;
+    if (!url || !url.trim()) {
+      return res.status(400).json({ error: 'URL adresi zorunludur.' });
+    }
+
+    const cleanUrl = url.trim();
+    let snapshotText = initial_content || '';
+    let extractedTitle = title ? title.trim() : '';
+    let httpStatus = 200;
+    let hash = '';
+
+    // If initial content is not provided, fetch it live
+    if (!snapshotText) {
+      const fetched = await fetchUrlSnapshot(cleanUrl);
+      if (fetched.success) {
+        snapshotText = fetched.text;
+        httpStatus = fetched.httpStatus;
+        hash = fetched.hash;
+        if (!extractedTitle && fetched.title) {
+          extractedTitle = fetched.title;
+        }
+      } else {
+        httpStatus = fetched.httpStatus || 500;
+        snapshotText = `[İlk tarama hatası: ${fetched.error || 'İçerik çekilemedi'}]`;
+      }
+    }
+
+    if (!extractedTitle) {
+      extractedTitle = cleanUrl.replace(/^https?:\/\//i, '').split('/')[0];
+    }
+    if (!hash) {
+      hash = computeHash(snapshotText);
+    }
+
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    const { lastInsertId } = execute(`
+      INSERT INTO url_monitored_items (
+        category_id, title, url, check_interval_hours, last_checked_at, last_changed_at,
+        has_changes, status, http_status, initial_snapshot_content, last_snapshot_content,
+        content_hash, change_summary, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      category_id ? Number(category_id) : null,
+      extractedTitle,
+      cleanUrl,
+      check_interval_hours ? Number(check_interval_hours) : 24,
+      nowStr,
+      nowStr,
+      0,
+      'active',
+      httpStatus,
+      snapshotText,
+      snapshotText,
+      hash,
+      'İlk kayıt oluşturuldu (Referans Baseline)',
+      notes || ''
+    ]);
+
+    // Insert baseline history
+    execute(`
+      INSERT INTO url_monitor_history (
+        item_id, checked_at, http_status, has_changed, previous_content, current_content,
+        content_hash, diff_summary, diff_details, change_type, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      lastInsertId,
+      nowStr,
+      httpStatus,
+      0,
+      '',
+      snapshotText,
+      hash,
+      'İlk referans snapshot kaydedildi.',
+      '[]',
+      'initial',
+      'Kayıt başlangıç noktası'
+    ]);
+
+    const created = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [lastInsertId]);
+
+    return res.status(201).json({
+      success: true,
+      message: 'URL takibi başarıyla eklendi ve ilk snapshot alındı.',
+      item: created
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 8. Get item details + history + baseline diff
+apiRouter.get('/url-monitor/items/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const item = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [id]);
+
+    if (!item) {
+      return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
+    }
+
+    const history = queryAll(`
+      SELECT * FROM url_monitor_history
+      WHERE item_id = ?
+      ORDER BY checked_at DESC
+    `, [id]);
+
+    // Calculate diff between baseline snapshot and last snapshot
+    const baselineDiff = computeTextDiff(
+      item.initial_snapshot_content || '',
+      item.last_snapshot_content || ''
+    );
+
+    return res.json({
+      success: true,
+      item,
+      history,
+      baselineDiff
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Update monitored item
+apiRouter.put('/url-monitor/items/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM url_monitored_items WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
+    }
+
+    const { category_id, title, url, check_interval_hours, status, notes } = req.body;
+
+    execute(`
+      UPDATE url_monitored_items SET
+        category_id = ?,
+        title = ?,
+        url = ?,
+        check_interval_hours = ?,
+        status = ?,
+        notes = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [
+      category_id !== undefined ? (category_id ? Number(category_id) : null) : existing.category_id,
+      title !== undefined ? title.trim() : existing.title,
+      url !== undefined ? url.trim() : existing.url,
+      check_interval_hours !== undefined ? Number(check_interval_hours) : existing.check_interval_hours,
+      status !== undefined ? status : existing.status,
+      notes !== undefined ? notes : existing.notes,
+      id
+    ]);
+
+    const updated = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [id]);
+
+    return res.json({
+      success: true,
+      message: 'URL takibi güncellendi.',
+      item: updated
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 10. Delete monitored item
+apiRouter.delete('/url-monitor/items/:id', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM url_monitored_items WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
+    }
+
+    execute('DELETE FROM url_monitor_history WHERE item_id = ?', [id]);
+    execute('DELETE FROM url_monitored_items WHERE id = ?', [id]);
+
+    return res.json({
+      success: true,
+      message: 'URL takibi ve tüm kontrol geçmişi silindi.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 11. Run immediate check for a single URL
+apiRouter.post('/url-monitor/items/:id/check', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const item = queryOne('SELECT * FROM url_monitored_items WHERE id = ?', [id]);
+    if (!item) {
+      return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
+    }
+
+    const fetched = await fetchUrlSnapshot(item.url);
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    if (!fetched.success) {
+      execute(`
+        UPDATE url_monitored_items SET
+          last_checked_at = ?,
+          status = 'error',
+          http_status = ?
+        WHERE id = ?
+      `, [nowStr, fetched.httpStatus || 500, id]);
+
+      execute(`
+        INSERT INTO url_monitor_history (
+          item_id, checked_at, http_status, has_changed, previous_content, current_content,
+          diff_summary, diff_details, change_type, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        id,
+        nowStr,
+        fetched.httpStatus || 500,
+        0,
+        item.last_snapshot_content,
+        '',
+        `Tarama hatası: ${fetched.error}`,
+        '[]',
+        'error',
+        fetched.error || ''
+      ]);
+
+      return res.json({
+        success: false,
+        error: fetched.error,
+        httpStatus: fetched.httpStatus
+      });
+    }
+
+    // Compare with baseline snapshot
+    const baselineDiff = computeTextDiff(
+      item.initial_snapshot_content || '',
+      fetched.text
+    );
+
+    // Also compare with previous check snapshot
+    const stepDiff = computeTextDiff(
+      item.last_snapshot_content || '',
+      fetched.text
+    );
+
+    const hasChanged = baselineDiff.hasChanged;
+    const lastChangedAt = hasChanged ? nowStr : (item.last_changed_at || nowStr);
+
+    execute(`
+      UPDATE url_monitored_items SET
+        last_checked_at = ?,
+        last_changed_at = ?,
+        has_changes = ?,
+        status = 'active',
+        http_status = ?,
+        last_snapshot_content = ?,
+        content_hash = ?,
+        change_summary = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [
+      nowStr,
+      lastChangedAt,
+      hasChanged ? 1 : 0,
+      fetched.httpStatus,
+      fetched.text,
+      fetched.hash,
+      baselineDiff.summary,
+      id
+    ]);
+
+    // Insert history entry
+    execute(`
+      INSERT INTO url_monitor_history (
+        item_id, checked_at, http_status, has_changed, previous_content, current_content,
+        content_hash, diff_summary, diff_details, change_type, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      id,
+      nowStr,
+      fetched.httpStatus,
+      stepDiff.hasChanged ? 1 : 0,
+      item.last_snapshot_content,
+      fetched.text,
+      fetched.hash,
+      stepDiff.summary,
+      JSON.stringify(baselineDiff.diffLines),
+      stepDiff.hasChanged ? 'changed' : 'unchanged',
+      hasChanged ? 'Değişiklik algılandı' : 'Sayfa güncel'
+    ]);
+
+    const updatedItem = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [id]);
+
+    const history = queryAll(`
+      SELECT * FROM url_monitor_history
+      WHERE item_id = ?
+      ORDER BY checked_at DESC
+    `, [id]);
+
+    return res.json({
+      success: true,
+      message: hasChanged
+        ? `Değişiklik tespit edildi: ${baselineDiff.summary}`
+        : 'Sayfa kontrol edildi, referans kaydına göre değişiklik yok.',
+      item: updatedItem,
+      history,
+      baselineDiff
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 12. Check all active URLs
+apiRouter.post('/url-monitor/check-all', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const items = queryAll('SELECT id, url, initial_snapshot_content, last_snapshot_content, last_changed_at FROM url_monitored_items WHERE status != "paused"');
+    
+    let changedCount = 0;
+    let checkedCount = 0;
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    for (const item of items) {
+      try {
+        const fetched = await fetchUrlSnapshot(item.url);
+        checkedCount++;
+
+        if (fetched.success) {
+          const baselineDiff = computeTextDiff(
+            item.initial_snapshot_content || '',
+            fetched.text
+          );
+          const stepDiff = computeTextDiff(
+            item.last_snapshot_content || '',
+            fetched.text
+          );
+
+          if (baselineDiff.hasChanged) {
+            changedCount++;
+          }
+
+          const lastChangedAt = baselineDiff.hasChanged ? nowStr : (item.last_changed_at || nowStr);
+
+          execute(`
+            UPDATE url_monitored_items SET
+              last_checked_at = ?,
+              last_changed_at = ?,
+              has_changes = ?,
+              status = 'active',
+              http_status = ?,
+              last_snapshot_content = ?,
+              content_hash = ?,
+              change_summary = ?,
+              updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+          `, [
+            nowStr,
+            lastChangedAt,
+            baselineDiff.hasChanged ? 1 : 0,
+            fetched.httpStatus,
+            fetched.text,
+            fetched.hash,
+            baselineDiff.summary,
+            item.id
+          ]);
+
+          execute(`
+            INSERT INTO url_monitor_history (
+              item_id, checked_at, http_status, has_changed, previous_content, current_content,
+              content_hash, diff_summary, diff_details, change_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [
+            item.id,
+            nowStr,
+            fetched.httpStatus,
+            stepDiff.hasChanged ? 1 : 0,
+            item.last_snapshot_content,
+            fetched.text,
+            fetched.hash,
+            stepDiff.summary,
+            JSON.stringify(baselineDiff.diffLines),
+            stepDiff.hasChanged ? 'changed' : 'unchanged'
+          ]);
+        }
+      } catch (e) {
+        console.error('Error checking item:', item.id, e);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `${checkedCount} adet URL kontrol edildi. ${changedCount} tanesinde değişiklik tespit edildi.`,
+      checkedCount,
+      changedCount
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 13. Acknowledge change / Set current content as new Baseline
+apiRouter.post('/url-monitor/items/:id/acknowledge', authenticateToken, (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const item = queryOne('SELECT * FROM url_monitored_items WHERE id = ?', [id]);
+    if (!item) {
+      return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
+    }
+
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    execute(`
+      UPDATE url_monitored_items SET
+        initial_snapshot_content = last_snapshot_content,
+        has_changes = 0,
+        change_summary = 'Değişiklik onaylandı. Mevcut içerik yeni referans (baseline) yapıldı.',
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [id]);
+
+    execute(`
+      INSERT INTO url_monitor_history (
+        item_id, checked_at, http_status, has_changed, previous_content, current_content,
+        diff_summary, diff_details, change_type, notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+      id,
+      nowStr,
+      item.http_status || 200,
+      0,
+      item.last_snapshot_content,
+      item.last_snapshot_content,
+      'Kullanıcı değişikliği onayladı ve referansı güncelledi.',
+      '[]',
+      'unchanged',
+      'Referans Sıfırlama'
+    ]);
+
+    const updated = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [id]);
+
+    const history = queryAll(`
+      SELECT * FROM url_monitor_history
+      WHERE item_id = ?
+      ORDER BY checked_at DESC
+    `, [id]);
+
+    return res.json({
+      success: true,
+      message: 'Değişiklik onaylandı ve yeni referans olarak kaydedildi.',
+      item: updated,
+      history,
+      baselineDiff: {
+        hasChanged: false,
+        diffLines: [],
+        summary: 'Değişiklik yok (Referans güncel)',
+        addedCount: 0,
+        removedCount: 0,
+        unchangedCount: 0,
+        changePercentage: 0
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+

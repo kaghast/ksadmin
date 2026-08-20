@@ -7,7 +7,8 @@ import {
   Receipt,
   Settings,
   Tags,
-  Network
+  Network,
+  Globe
 } from 'lucide-react';
 import { ActiveTab } from './Sidebar';
 
@@ -24,6 +25,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({ activeTab, setActiveTab })
     { id: 'expenses' as ActiveTab, label: 'Harcamalar', icon: Tags },
     { id: 'kmh' as ActiveTab, label: 'KMH', icon: WalletCards },
     { id: 'mindmap' as ActiveTab, label: 'Zihin Haritası', icon: Network },
+    { id: 'url-monitor' as ActiveTab, label: 'Web Takip', icon: Globe },
     { id: 'payments' as ActiveTab, label: 'Ödemeler', icon: Receipt },
     { id: 'settings' as ActiveTab, label: 'Ayarlar', icon: Settings }
   ];

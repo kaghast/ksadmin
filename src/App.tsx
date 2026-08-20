@@ -10,6 +10,7 @@ import { CreditCardsView } from './components/credit-cards/CreditCardsView';
 import { ExpensesView } from './components/expenses/ExpensesView';
 import { KmhView } from './components/kmh/KmhView';
 import { MindmapView } from './components/mindmap/MindmapView';
+import { UrlMonitorView } from './components/url-monitor/UrlMonitorView';
 import { PaymentsView } from './components/payments/PaymentsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { api } from './services/api';
@@ -299,6 +300,10 @@ function DashboardContent() {
 
             {activeTab === 'mindmap' && (
               <MindmapView showToast={showToast} />
+            )}
+
+            {activeTab === 'url-monitor' && (
+              <UrlMonitorView />
             )}
 
             {activeTab === 'payments' && (

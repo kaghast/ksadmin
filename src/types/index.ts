@@ -159,3 +159,70 @@ export interface FinancialSummaryData {
   creditCardCount: number;
   kmhCount: number;
 }
+
+// ==========================================
+// URL MONITOR & WEB TRACKER TYPES
+// ==========================================
+
+export interface UrlMonitorCategory {
+  id: number;
+  name: string;
+  color?: string;
+  icon?: string;
+  item_count?: number;
+  created_at?: string;
+}
+
+export interface UrlMonitoredItem {
+  id: number;
+  category_id?: number | null;
+  category_name?: string;
+  category_color?: string;
+  title: string;
+  url: string;
+  selector?: string;
+  check_interval_hours?: number;
+  last_checked_at?: string;
+  last_changed_at?: string;
+  has_changes: number; // 0 or 1
+  status: 'active' | 'paused' | 'error';
+  http_status?: number;
+  initial_snapshot_content?: string;
+  last_snapshot_content?: string;
+  content_hash?: string;
+  change_summary?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  history_count?: number;
+}
+
+export interface UrlMonitorHistoryItem {
+  id: number;
+  item_id: number;
+  checked_at: string;
+  http_status: number;
+  has_changed: number;
+  previous_content?: string;
+  current_content?: string;
+  content_hash?: string;
+  diff_summary?: string;
+  diff_details?: string;
+  change_type: 'initial' | 'changed' | 'unchanged' | 'error';
+  notes?: string;
+}
+
+export interface DiffLine {
+  type: 'added' | 'removed' | 'unchanged';
+  text: string;
+  oldNum?: number;
+  newNum?: number;
+}
+
+export interface UrlMonitorStats {
+  totalItems: number;
+  changedItemsCount: number;
+  checkedTodayCount: number;
+  categoriesCount: number;
+}
+
