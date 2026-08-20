@@ -1,0 +1,6 @@
+{
+  "name": "KSADMIN - Finansal Borç ve Yönetim Paneli",
+  "description": "Krediler, kredi kartları ve kredili mevduat hesapları (KMH) için modern, güvenli ve minimalist finansal yönetim ve admin paneli.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
