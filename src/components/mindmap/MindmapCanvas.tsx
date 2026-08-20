@@ -233,11 +233,13 @@ export const MindmapCanvas: React.FC<MindmapCanvasProps> = ({
     img.src = url;
   };
 
+  const isFixedOverlay = isFullscreen && isFullscreenControlled === undefined;
+
   return (
     <div
       ref={containerRef}
       className={`relative w-full h-full bg-slate-50/70 border border-slate-200 rounded-xl overflow-hidden select-none flex flex-col ${
-        isFullscreen ? 'fixed inset-0 z-50 rounded-none bg-slate-100' : ''
+        isFixedOverlay ? 'fixed inset-0 z-50 rounded-none bg-slate-100' : ''
       } ${className}`}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}

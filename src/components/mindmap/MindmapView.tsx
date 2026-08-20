@@ -27,7 +27,12 @@ import {
   CheckCircle2,
   X,
   Maximize2,
-  Minimize2
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Columns
 } from 'lucide-react';
 import { MindmapVersion } from '../../types';
 import { api } from '../../services/api';
@@ -76,7 +81,34 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
 
   // Mobile / tablet sub-tab switcher for responsive view
   const [mobileTab, setMobileTab] = useState<'editor' | 'mindmap' | 'versions'>('mindmap');
-  const [isCanvasFullscreen, setIsCanvasFullscreen] = useState(false);
+  const [showEditor, setShowEditor] = useState<boolean>(true);
+  const [showSidebar, setShowSidebar] = useState<boolean>(true);
+
+  // Fullscreen is active when both side panels are hidden
+  const isFullscreen = !showEditor && !showSidebar;
+
+  const toggleFullscreen = () => {
+    if (isFullscreen) {
+      setShowEditor(true);
+      setShowSidebar(true);
+    } else {
+      setShowEditor(false);
+      setShowSidebar(false);
+    }
+  };
+
+  const gridColsClass = useMemo(() => {
+    if (showEditor && showSidebar) {
+      return 'lg:grid-cols-[1fr_1fr_300px]';
+    }
+    if (showEditor && !showSidebar) {
+      return 'lg:grid-cols-[1fr_1fr]';
+    }
+    if (!showEditor && showSidebar) {
+      return 'lg:grid-cols-[1fr_300px]';
+    }
+    return 'lg:grid-cols-1';
+  }, [showEditor, showSidebar]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const autoSaveTimerRef = useRef<any>(null);
@@ -342,9 +374,54 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Panel Visibility & Fullscreen Controls */}
+          <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setShowEditor(!showEditor)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                showEditor
+                  ? 'bg-white text-blue-700 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+              title={showEditor ? "Markdown Editörü Gizle" : "Markdown Editörü Göster"}
+            >
+              {showEditor ? <PanelLeftClose className="w-3.5 h-3.5" /> : <PanelLeftOpen className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">Editör</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                isFullscreen
+                  ? 'bg-slate-900 text-white shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+              title={isFullscreen ? "Küçült (ESC)" : "Zihin Haritasını Tam Ekran Yap (Editör ve Sidebar Gizlenir)"}
+            >
+              {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              <span>{isFullscreen ? 'Küçült' : 'Tam Ekran'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowSidebar(!showSidebar)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                showSidebar
+                  ? 'bg-white text-purple-700 shadow-2xs'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/60'
+              }`}
+              title={showSidebar ? "Aylık Versiyonlar Sidebar'ını Gizle" : "Aylık Versiyonlar Sidebar'ını Göster"}
+            >
+              {showSidebar ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">Versiyonlar</span>
+            </button>
+          </div>
+
           {/* Auto-save & Status indicator */}
-          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 mr-2 font-medium">
+          <div className="hidden xl:flex items-center gap-1.5 text-xs text-slate-500 mr-1 font-medium">
             {isSaving ? (
               <span className="flex items-center gap-1 text-blue-600">
                 <span className="w-2 h-2 rounded-full bg-blue-600 animate-ping" />
@@ -353,12 +430,12 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
             ) : hasUnsavedChanges ? (
               <span className="flex items-center gap-1 text-amber-600">
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
-                Kaydedilmemiş değişiklikler var
+                Kaydedilmemiş
               </span>
             ) : lastSavedTime ? (
               <span className="flex items-center gap-1 text-slate-400">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                Son kayıt: {lastSavedTime}
+                {lastSavedTime}
               </span>
             ) : null}
           </div>
@@ -366,7 +443,7 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
           <button
             onClick={() => saveCurrentVersion()}
             disabled={isSaving}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             <span>{isSaving ? 'Kaydediliyor...' : 'Kaydet'}</span>
@@ -381,10 +458,10 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
               setCloneFromCurrent(false);
               setIsNewModalOpen(true);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Yeni Versiyon / Ay</span>
+            <span className="hidden sm:inline">Yeni Versiyon</span>
           </button>
         </div>
       </div>
@@ -413,24 +490,22 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
             mobileTab === 'versions' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
           }`}
         >
-          3. Aylık Versiyonlar ({versions.length})
+          3. Versiyonlar ({versions.length})
         </button>
       </div>
 
       {/* ======================================================== */}
       {/* 3-SECTION MAIN CONTAINER                                 */}
-      {/* SECTION 1: Markdown Editor (Equal Width 1)               */}
-      {/* SECTION 2: Mindmap Canvas (Equal Width 2)                */}
-      {/* SECTION 3: Right Sidebar (Year/Month Versions)           */}
+      {/* Dynamic columns based on showEditor & showSidebar        */}
       {/* ======================================================== */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_1fr_300px] gap-3 min-h-0">
+      <div className={`flex-1 grid grid-cols-1 ${gridColsClass} gap-3 min-h-0`}>
         
         {/* ====================================================== */}
         {/* SECTION 1: MARKDOWN EDITOR                             */}
         {/* ====================================================== */}
         <div
           className={`bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col min-h-0 overflow-hidden ${
-            mobileTab !== 'editor' ? 'hidden lg:flex' : 'flex'
+            !showEditor ? 'hidden' : (mobileTab !== 'editor' ? 'hidden lg:flex' : 'flex')
           }`}
         >
           {/* Editor Header & Formatting Toolbar */}
@@ -440,34 +515,46 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
               <span className="text-xs font-bold text-slate-800">1. Markdown Editörü</span>
             </div>
 
-            {/* Quick Template Selector */}
-            <div className="relative">
-              <button
-                onClick={() => setIsTemplateMenuOpen(!isTemplateMenuOpen)}
-                className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-md text-[11px] font-semibold transition-colors cursor-pointer shadow-2xs"
-              >
-                <Sparkles className="w-3 h-3 text-amber-500" />
-                <span>Hazır Şablonlar</span>
-                <ChevronDown className="w-3 h-3 text-slate-400" />
-              </button>
+            <div className="flex items-center gap-1.5">
+              {/* Quick Template Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsTemplateMenuOpen(!isTemplateMenuOpen)}
+                  className="flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-md text-[11px] font-semibold transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span>Hazır Şablonlar</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
 
-              {isTemplateMenuOpen && (
-                <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1 text-xs">
-                  <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
-                    Şablon Seçiniz
+                {isTemplateMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1 text-xs">
+                    <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100">
+                      Şablon Seçiniz
+                    </div>
+                    {MINDMAP_TEMPLATES.map((tmpl) => (
+                      <button
+                        key={tmpl.id}
+                        onClick={() => applyTemplate(tmpl.markdown, tmpl.title)}
+                        className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors flex flex-col cursor-pointer"
+                      >
+                        <span className="font-semibold text-slate-800">{tmpl.title}</span>
+                        <span className="text-[10px] text-slate-500 truncate">{tmpl.description}</span>
+                      </button>
+                    ))}
                   </div>
-                  {MINDMAP_TEMPLATES.map((tmpl) => (
-                    <button
-                      key={tmpl.id}
-                      onClick={() => applyTemplate(tmpl.markdown, tmpl.title)}
-                      className="w-full px-3 py-2 text-left hover:bg-blue-50 transition-colors flex flex-col cursor-pointer"
-                    >
-                      <span className="font-semibold text-slate-800">{tmpl.title}</span>
-                      <span className="text-[10px] text-slate-500 truncate">{tmpl.description}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+                )}
+              </div>
+
+              {/* Hide Editor Button */}
+              <button
+                type="button"
+                onClick={() => setShowEditor(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 rounded transition-colors cursor-pointer"
+                title="Editörü Gizle (Ctrl / Click)"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
@@ -549,28 +636,57 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
           }`}
         >
           <div className="p-2.5 border-b border-slate-200 bg-slate-50/80 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-1.5">
-              <Layers className="w-4 h-4 text-indigo-600" />
-              <span className="text-xs font-bold text-slate-800">2. İnteraktif Zihin Haritası</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-indigo-600" />
+                <span className="text-xs font-bold text-slate-800">2. İnteraktif Zihin Haritası</span>
+              </div>
+
+              {/* Show Editor Button if hidden */}
+              {!showEditor && (
+                <button
+                  type="button"
+                  onClick={() => setShowEditor(true)}
+                  className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer"
+                  title="Markdown Editörünü Aç"
+                >
+                  <PanelLeftOpen className="w-3 h-3" />
+                  <span>Editörü Göster</span>
+                </button>
+              )}
+
+              {/* Show Sidebar Button if hidden */}
+              {!showSidebar && (
+                <button
+                  type="button"
+                  onClick={() => setShowSidebar(true)}
+                  className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition-colors cursor-pointer"
+                  title="Aylık Versiyonlar Sidebar'ını Aç"
+                >
+                  <PanelRightOpen className="w-3 h-3" />
+                  <span>Versiyonları Göster</span>
+                </button>
+              )}
             </div>
+
             <div className="flex items-center gap-2">
               <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200 hidden sm:inline-block">
                 Ortadan Dağılım (Radial)
               </span>
               <button
                 type="button"
-                onClick={() => setIsCanvasFullscreen((prev) => !prev)}
+                onClick={toggleFullscreen}
                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold shadow-2xs transition-all cursor-pointer ${
-                  isCanvasFullscreen
+                  isFullscreen
                     ? 'bg-slate-900 text-white hover:bg-slate-800'
                     : 'bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 hover:border-indigo-300'
                 }`}
-                title={isCanvasFullscreen ? 'Tam Ekrandan Çık (ESC)' : 'Mindmap Tam Ekran Görünümü'}
+                title={isFullscreen ? 'Panelleri Göster / Küçült (ESC)' : 'Zihin Haritasını Tam Ekran Yap (Editör ve Sidebar Gizlenir)'}
               >
-                {isCanvasFullscreen ? (
+                {isFullscreen ? (
                   <>
                     <Minimize2 className="w-3.5 h-3.5" />
-                    <span>Küçült</span>
+                    <span>Küçült (ESC)</span>
                   </>
                 ) : (
                   <>
@@ -585,8 +701,16 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
           <div className="flex-1 min-h-0 p-2 relative">
             <MindmapCanvas
               markdown={markdownContent}
-              isFullscreenControlled={isCanvasFullscreen}
-              onFullscreenChange={setIsCanvasFullscreen}
+              isFullscreenControlled={isFullscreen}
+              onFullscreenChange={(fs) => {
+                if (fs) {
+                  setShowEditor(false);
+                  setShowSidebar(false);
+                } else {
+                  setShowEditor(true);
+                  setShowSidebar(true);
+                }
+              }}
             />
           </div>
         </div>
@@ -596,7 +720,7 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
         {/* ====================================================== */}
         <div
           className={`bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col min-h-0 overflow-hidden ${
-            mobileTab !== 'versions' ? 'hidden lg:flex' : 'flex'
+            !showSidebar ? 'hidden' : (mobileTab !== 'versions' ? 'hidden lg:flex' : 'flex')
           }`}
         >
           {/* Sidebar Header */}
@@ -605,20 +729,30 @@ export const MindmapView: React.FC<MindmapViewProps> = ({ showToast }) => {
               <History className="w-4 h-4 text-purple-600" />
               <span className="text-xs font-bold text-slate-800">3. Aylık Versiyonlar</span>
             </div>
-            <button
-              onClick={() => {
-                setNewYear(new Date().getFullYear());
-                setNewMonth(new Date().getMonth() + 1);
-                setNewTitle('');
-                setNewNotes('');
-                setCloneFromCurrent(false);
-                setIsNewModalOpen(true);
-              }}
-              className="p-1 text-purple-700 hover:bg-purple-100 rounded transition-colors cursor-pointer"
-              title="Yeni Ay Versiyonu Ekle"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => {
+                  setNewYear(new Date().getFullYear());
+                  setNewMonth(new Date().getMonth() + 1);
+                  setNewTitle('');
+                  setNewNotes('');
+                  setCloneFromCurrent(false);
+                  setIsNewModalOpen(true);
+                }}
+                className="p-1 text-purple-700 hover:bg-purple-100 rounded transition-colors cursor-pointer"
+                title="Yeni Ay Versiyonu Ekle"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSidebar(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 rounded transition-colors cursor-pointer"
+                title="Sidebar'ı Gizle"
+              >
+                <PanelRightClose className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Quick Actions in Sidebar */}
