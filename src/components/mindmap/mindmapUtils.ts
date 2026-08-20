@@ -72,6 +72,14 @@ export function parseMarkdownToTree(markdown: string): MindmapNode {
     let level = 1;
     let text = trimmed;
 
+    // Helper to find last heading on stack
+    const getLastHeadingLevel = () => {
+      for (let sIdx = stack.length - 1; sIdx >= 0; sIdx--) {
+        if (stack[sIdx].level <= 3) return stack[sIdx].level;
+      }
+      return 1;
+    };
+
     // Check headings
     if (trimmed.startsWith('#### ')) {
       level = 3;
@@ -86,8 +94,7 @@ export function parseMarkdownToTree(markdown: string): MindmapNode {
       // List items: level depends on indentation
       const leadingSpaces = rawLine.search(/\S/);
       const indentLevel = Math.max(0, Math.floor(leadingSpaces / 2));
-      // Base level is higher than the last heading on stack
-      const lastHeadingLevel = stack.findLast((s) => s.level <= 3)?.level || 1;
+      const lastHeadingLevel = getLastHeadingLevel();
       level = Math.max(lastHeadingLevel + 1, lastHeadingLevel + 1 + indentLevel);
       text = trimmed.substring(2).trim();
     } else if (/^\d+\.\s/.test(trimmed)) {
@@ -96,11 +103,11 @@ export function parseMarkdownToTree(markdown: string): MindmapNode {
       text = match ? match[1].trim() : trimmed;
       const leadingSpaces = rawLine.search(/\S/);
       const indentLevel = Math.max(0, Math.floor(leadingSpaces / 2));
-      const lastHeadingLevel = stack.findLast((s) => s.level <= 3)?.level || 1;
+      const lastHeadingLevel = getLastHeadingLevel();
       level = Math.max(lastHeadingLevel + 1, lastHeadingLevel + 1 + indentLevel);
     } else {
       // Regular text block as child of current top
-      const lastHeadingLevel = stack.findLast((s) => s.level <= 3)?.level || 1;
+      const lastHeadingLevel = getLastHeadingLevel();
       level = lastHeadingLevel + 1;
     }
 

@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { Lock, Mail, Eye, EyeOff, ShieldCheck, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { Lock, Mail, Eye, EyeOff, ArrowRight, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const LoginView: React.FC = () => {
   const { login } = useAuth();
-  const [email, setEmail] = useState('kemalsahin@gmail.com');
-  const [password, setPassword] = useState('123**654');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -22,12 +22,6 @@ export const LoginView: React.FC = () => {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleQuickFill = () => {
-    setEmail('kemalsahin@gmail.com');
-    setPassword('123**654');
-    setError(null);
   };
 
   return (
@@ -117,27 +111,6 @@ export const LoginView: React.FC = () => {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Helper */}
-          <div className="mt-6 pt-5 border-t border-slate-100 text-center">
-            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-600">
-              <div className="flex items-center justify-center gap-1.5 text-blue-600 font-semibold mb-1">
-                <ShieldCheck className="w-4 h-4" />
-                <span>Tanımlı Yönetici Girişi</span>
-              </div>
-              <div className="text-slate-700 font-mono text-[11px]">
-                {email} &bull; {password}
-              </div>
-              <button
-                type="button"
-                onClick={handleQuickFill}
-                className="mt-2 text-xs text-blue-600 hover:text-blue-700 underline font-semibold inline-flex items-center gap-1 cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3" />
-                Bilgileri Doldur
-              </button>
-            </div>
-          </div>
         </div>
 
         <p className="text-center text-xs text-slate-400 mt-6">

@@ -1,17 +1,17 @@
-# Base image
+# Stage 1: Build Frontend
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Install all dependencies (including devDependencies for build)
 COPY package*.json ./
-RUN npm ci || npm install
+RUN npm install
 
-# Copy source and build
+# Copy source and build frontend bundle
 COPY . .
 RUN npm run build
 
-# Production runtime
+# Stage 2: Production Runtime
 FROM node:20-alpine AS runner
 
 WORKDIR /app
@@ -19,22 +19,25 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV DATA_DIR=/app/data
 
-# Copy built application and dependencies
+# Copy package manifests and dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev || npm install --production
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/server.ts ./server.ts
-COPY --from=builder /app/src/server ./src/server
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/src ./src
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# Ensure data directory for SQLite database persistence in Coolify volumes
+# Setup SQLite data storage directory with proper permissions
 RUN mkdir -p /app/data && chown -R node:node /app
 
 USER node
 
 EXPOSE 3000
 
-# Volume for SQLite persistence across deployments
+# Persistent volume for SQLite database
 VOLUME ["/app/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
 
 CMD ["npm", "start"]

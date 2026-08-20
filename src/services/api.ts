@@ -26,14 +26,33 @@ function getHeaders(): HeadersInit {
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
-  const data = await res.json();
+  const contentType = res.headers.get('content-type') || '';
+  let data: any = null;
+
+  try {
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      if (text && text.trim().startsWith('{') && text.trim().endsWith('}')) {
+        data = JSON.parse(text);
+      } else {
+        data = { error: text || `Sunucu geçersiz yanıt verdi (${res.status} ${res.statusText})` };
+      }
+    }
+  } catch (err: any) {
+    data = { error: `Sunucu yanıtı okunamadı (${res.status} ${res.statusText}): ${err.message}` };
+  }
+
   if (!res.ok) {
     if (res.status === 401 || res.status === 403) {
       // If unauthorized, clear token
       localStorage.removeItem('ksadmin_token');
     }
-    throw new Error(data.error || 'İşlem gerçekleştirilemedi.');
+    const errorMsg = data?.error || (res.status === 502 || res.status === 504 ? 'Sunucuya ulaşılamıyor (502/504 Ağ Hatası). Coolify container veya port ayarlarını kontrol edin.' : `İşlem gerçekleştirilemedi (${res.status} ${res.statusText}).`);
+    throw new Error(errorMsg);
   }
+
   return data;
 }
 
