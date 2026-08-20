@@ -185,6 +185,7 @@ export interface UrlMonitoredItem {
   last_checked_at?: string;
   last_changed_at?: string;
   has_changes: number; // 0 or 1
+  is_tracked?: number; // 1: Aktif Takip, 0: Takip Edilmiyor (Yer İmi/Referans)
   status: 'active' | 'paused' | 'error';
   http_status?: number;
   initial_snapshot_content?: string;

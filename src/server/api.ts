@@ -1692,7 +1692,7 @@ apiRouter.delete('/url-monitor/categories/:id', authenticateToken, (req: Request
 // 5. Get all monitored items with category info and filters
 apiRouter.get('/url-monitor/items', authenticateToken, (req: Request, res: Response) => {
   try {
-    const { category_id, has_changes, search } = req.query;
+    const { category_id, has_changes, is_tracked, search } = req.query;
 
     let sql = `
       SELECT 
@@ -1721,20 +1721,26 @@ apiRouter.get('/url-monitor/items', authenticateToken, (req: Request, res: Respo
       sql += ' AND i.has_changes = 0';
     }
 
+    if (is_tracked === '1' || is_tracked === 'true') {
+      sql += ' AND (i.is_tracked = 1 OR i.is_tracked IS NULL)';
+    } else if (is_tracked === '0' || is_tracked === 'false') {
+      sql += ' AND i.is_tracked = 0';
+    }
+
     if (search && typeof search === 'string' && search.trim()) {
       sql += ' AND (i.title LIKE ? OR i.url LIKE ? OR i.notes LIKE ?)';
       const term = `%${search.trim()}%`;
       params.push(term, term, term);
     }
 
-    sql += ' ORDER BY i.has_changes DESC, i.updated_at DESC';
+    sql += ' ORDER BY (CASE WHEN i.is_tracked = 0 THEN 1 ELSE 0 END) ASC, i.has_changes DESC, i.updated_at DESC';
 
     const items = queryAll(sql, params);
 
     // Calculate stats
-    const allItems = queryAll('SELECT id, has_changes, last_checked_at FROM url_monitored_items');
+    const allItems = queryAll('SELECT id, has_changes, is_tracked, last_checked_at FROM url_monitored_items');
     const totalItems = allItems.length;
-    const changedItemsCount = allItems.filter(i => i.has_changes === 1).length;
+    const changedItemsCount = allItems.filter(i => (i.is_tracked === 1 || i.is_tracked === null || i.is_tracked === undefined) && i.has_changes === 1).length;
     const todayStr = new Date().toISOString().split('T')[0];
     const checkedTodayCount = allItems.filter(i => i.last_checked_at && i.last_checked_at.startsWith(todayStr)).length;
     const catCountRes = queryOne('SELECT COUNT(*) as count FROM url_monitor_categories');
@@ -1772,19 +1778,20 @@ apiRouter.post('/url-monitor/test-fetch', authenticateToken, async (req: Request
 // 7. Create monitored URL item (with immediate live snapshot fetch)
 apiRouter.post('/url-monitor/items', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const { category_id, title, url, check_interval_hours, notes, initial_content } = req.body;
+    const { category_id, title, url, check_interval_hours, is_tracked, notes, initial_content } = req.body;
     if (!url || !url.trim()) {
       return res.status(400).json({ error: 'URL adresi zorunludur.' });
     }
 
     const cleanUrl = url.trim();
+    const trackingEnabled = is_tracked !== undefined ? (Number(is_tracked) === 0 ? 0 : 1) : 1;
     let snapshotText = initial_content || '';
     let extractedTitle = title ? title.trim() : '';
     let httpStatus = 200;
     let hash = '';
 
-    // If initial content is not provided, fetch it live
-    if (!snapshotText) {
+    // If tracking is enabled and initial content is not provided, fetch it live
+    if (!snapshotText && trackingEnabled === 1) {
       const fetched = await fetchUrlSnapshot(cleanUrl);
       if (fetched.success) {
         snapshotText = fetched.text;
@@ -1802,7 +1809,7 @@ apiRouter.post('/url-monitor/items', authenticateToken, async (req: Request, res
     if (!extractedTitle) {
       extractedTitle = cleanUrl.replace(/^https?:\/\//i, '').split('/')[0];
     }
-    if (!hash) {
+    if (!hash && snapshotText) {
       hash = computeHash(snapshotText);
     }
 
@@ -1811,45 +1818,48 @@ apiRouter.post('/url-monitor/items', authenticateToken, async (req: Request, res
     const { lastInsertId } = execute(`
       INSERT INTO url_monitored_items (
         category_id, title, url, check_interval_hours, last_checked_at, last_changed_at,
-        has_changes, status, http_status, initial_snapshot_content, last_snapshot_content,
+        has_changes, is_tracked, status, http_status, initial_snapshot_content, last_snapshot_content,
         content_hash, change_summary, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       category_id ? Number(category_id) : null,
       extractedTitle,
       cleanUrl,
       check_interval_hours ? Number(check_interval_hours) : 24,
-      nowStr,
-      nowStr,
+      trackingEnabled === 1 ? nowStr : null,
+      trackingEnabled === 1 ? nowStr : null,
       0,
+      trackingEnabled,
       'active',
       httpStatus,
       snapshotText,
       snapshotText,
       hash,
-      'İlk kayıt oluşturuldu (Referans Baseline)',
+      trackingEnabled === 1 ? 'İlk kayıt oluşturuldu (Referans Baseline)' : 'Yer İmi Kaydı (Takip Kapalı)',
       notes || ''
     ]);
 
-    // Insert baseline history
-    execute(`
-      INSERT INTO url_monitor_history (
-        item_id, checked_at, http_status, has_changed, previous_content, current_content,
-        content_hash, diff_summary, diff_details, change_type, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      lastInsertId,
-      nowStr,
-      httpStatus,
-      0,
-      '',
-      snapshotText,
-      hash,
-      'İlk referans snapshot kaydedildi.',
-      '[]',
-      'initial',
-      'Kayıt başlangıç noktası'
-    ]);
+    // Insert baseline history if tracking enabled
+    if (trackingEnabled === 1) {
+      execute(`
+        INSERT INTO url_monitor_history (
+          item_id, checked_at, http_status, has_changed, previous_content, current_content,
+          content_hash, diff_summary, diff_details, change_type, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        lastInsertId,
+        nowStr,
+        httpStatus,
+        0,
+        '',
+        snapshotText,
+        hash,
+        'İlk referans snapshot kaydedildi.',
+        '[]',
+        'initial',
+        'Kayıt başlangıç noktası'
+      ]);
+    }
 
     const created = queryOne(`
       SELECT 
@@ -1863,7 +1873,7 @@ apiRouter.post('/url-monitor/items', authenticateToken, async (req: Request, res
 
     return res.status(201).json({
       success: true,
-      message: 'URL takibi başarıyla eklendi ve ilk snapshot alındı.',
+      message: trackingEnabled === 1 ? 'URL takibi başarıyla eklendi ve ilk snapshot alındı.' : 'URL yer imi olarak kaydedildi.',
       item: created
     });
   } catch (err: any) {
@@ -1921,7 +1931,9 @@ apiRouter.put('/url-monitor/items/:id', authenticateToken, (req: Request, res: R
       return res.status(404).json({ error: 'URL takip kaydı bulunamadı.' });
     }
 
-    const { category_id, title, url, check_interval_hours, status, notes } = req.body;
+    const { category_id, title, url, check_interval_hours, is_tracked, status, notes } = req.body;
+
+    const newIsTracked = is_tracked !== undefined ? (Number(is_tracked) === 0 ? 0 : 1) : (existing.is_tracked !== undefined ? existing.is_tracked : 1);
 
     execute(`
       UPDATE url_monitored_items SET
@@ -1929,6 +1941,7 @@ apiRouter.put('/url-monitor/items/:id', authenticateToken, (req: Request, res: R
         title = ?,
         url = ?,
         check_interval_hours = ?,
+        is_tracked = ?,
         status = ?,
         notes = ?,
         updated_at = CURRENT_TIMESTAMP
@@ -1938,6 +1951,7 @@ apiRouter.put('/url-monitor/items/:id', authenticateToken, (req: Request, res: R
       title !== undefined ? title.trim() : existing.title,
       url !== undefined ? url.trim() : existing.url,
       check_interval_hours !== undefined ? Number(check_interval_hours) : existing.check_interval_hours,
+      newIsTracked,
       status !== undefined ? status : existing.status,
       notes !== undefined ? notes : existing.notes,
       id
@@ -1956,6 +1970,93 @@ apiRouter.put('/url-monitor/items/:id', authenticateToken, (req: Request, res: R
     return res.json({
       success: true,
       message: 'URL takibi güncellendi.',
+      item: updated
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 9.1 Toggle tracking on/off
+apiRouter.post('/url-monitor/items/:id/toggle-track', authenticateToken, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const existing = queryOne('SELECT * FROM url_monitored_items WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'URL kaydı bulunamadı.' });
+    }
+
+    const newIsTracked = existing.is_tracked === 0 ? 1 : 0;
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+    if (newIsTracked === 1 && (!existing.initial_snapshot_content || existing.initial_snapshot_content.startsWith('[İlk tarama hatası'))) {
+      // Fetch initial snapshot now
+      const fetched = await fetchUrlSnapshot(existing.url);
+      if (fetched.success) {
+        execute(`
+          UPDATE url_monitored_items SET
+            is_tracked = 1,
+            last_checked_at = ?,
+            last_changed_at = ?,
+            has_changes = 0,
+            status = 'active',
+            http_status = ?,
+            initial_snapshot_content = ?,
+            last_snapshot_content = ?,
+            content_hash = ?,
+            change_summary = 'Takip aktif edildi ve referans snapshot alındı',
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [nowStr, nowStr, fetched.httpStatus, fetched.text, fetched.text, fetched.hash, id]);
+
+        execute(`
+          INSERT INTO url_monitor_history (
+            item_id, checked_at, http_status, has_changed, previous_content, current_content,
+            content_hash, diff_summary, diff_details, change_type, notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          id,
+          nowStr,
+          fetched.httpStatus,
+          0,
+          '',
+          fetched.text,
+          fetched.hash,
+          'Takip başlatıldı ve referans kaydedildi.',
+          '[]',
+          'initial',
+          'Takip aktif edildi'
+        ]);
+      } else {
+        execute(`
+          UPDATE url_monitored_items SET
+            is_tracked = 1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `, [id]);
+      }
+    } else {
+      execute(`
+        UPDATE url_monitored_items SET
+          is_tracked = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [newIsTracked, id]);
+    }
+
+    const updated = queryOne(`
+      SELECT 
+        i.*,
+        c.name as category_name,
+        c.color as category_color
+      FROM url_monitored_items i
+      LEFT JOIN url_monitor_categories c ON c.id = i.category_id
+      WHERE i.id = ?
+    `, [id]);
+
+    return res.json({
+      success: true,
+      message: newIsTracked === 1 ? 'URL takibi aktif edildi.' : 'URL takibi durduruldu (Yer İmi moduna alındı).',
       item: updated
     });
   } catch (err: any) {
@@ -2118,10 +2219,10 @@ apiRouter.post('/url-monitor/items/:id/check', authenticateToken, async (req: Re
   }
 });
 
-// 12. Check all active URLs
+// 12. Check all active URLs (only tracked ones)
 apiRouter.post('/url-monitor/check-all', authenticateToken, async (req: Request, res: Response) => {
   try {
-    const items = queryAll('SELECT id, url, initial_snapshot_content, last_snapshot_content, last_changed_at FROM url_monitored_items WHERE status != "paused"');
+    const items = queryAll('SELECT id, url, initial_snapshot_content, last_snapshot_content, last_changed_at FROM url_monitored_items WHERE status != "paused" AND (is_tracked = 1 OR is_tracked IS NULL)');
     
     let changedCount = 0;
     let checkedCount = 0;

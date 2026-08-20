@@ -481,6 +481,7 @@ export const api = {
     category_id?: number | null;
     title?: string;
     url: string;
+    is_tracked?: number;
     check_interval_hours?: number;
     notes?: string;
     initial_content?: string;
@@ -549,6 +550,18 @@ export const api = {
     baselineDiff: any;
   }> {
     const res = await fetch(`${API_BASE}/url-monitor/items/${id}/acknowledge`, {
+      method: 'POST',
+      headers: getHeaders()
+    });
+    return handleResponse(res);
+  },
+
+  async toggleUrlItemTracking(id: number): Promise<{
+    success: boolean;
+    message: string;
+    item: UrlMonitoredItem;
+  }> {
+    const res = await fetch(`${API_BASE}/url-monitor/items/${id}/toggle-track`, {
       method: 'POST',
       headers: getHeaders()
     });

@@ -15,20 +15,22 @@ import {
   Check,
   X,
   Layers,
-  ChevronRight,
-  Sparkles,
-  SlidersHorizontal,
   FileText,
   History,
   Tag,
-  ArrowRight,
-  Info,
-  ShieldCheck,
-  BarChart3,
   Filter,
   Eye,
-  Minimize2,
-  Maximize2
+  EyeOff,
+  Bookmark,
+  Play,
+  Pause,
+  FolderPlus,
+  CheckSquare,
+  Square,
+  Sparkles,
+  Link,
+  ShieldCheck,
+  ArrowUpRight
 } from 'lucide-react';
 import { api } from '../../services/api';
 import {
@@ -68,11 +70,10 @@ export const UrlMonitorView: React.FC = () => {
 
   const [activeSidebarTab, setActiveSidebarTab] = useState<'diff' | 'history' | 'preview'>('diff');
   const [diffFilterOnlyChanges, setDiffFilterOnlyChanges] = useState<boolean>(false);
-  const [selectedHistorySnapshot, setSelectedHistorySnapshot] = useState<UrlMonitorHistoryItem | null>(null);
 
   // Filters & Search
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | number>('all');
-  const [changeFilter, setChangeFilter] = useState<'all' | 'changed' | 'unchanged'>('all');
+  const [changeFilter, setChangeFilter] = useState<'all' | 'tracked' | 'untracked' | 'changed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Loading & Action States
@@ -81,6 +82,7 @@ export const UrlMonitorView: React.FC = () => {
   const [isCheckingAll, setIsCheckingAll] = useState(false);
   const [isCheckingSingle, setIsCheckingSingle] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [isTogglingTrack, setIsTogglingTrack] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -96,11 +98,13 @@ export const UrlMonitorView: React.FC = () => {
   const [editingItem, setEditingItem] = useState<Partial<UrlMonitoredItem> | null>(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<UrlMonitoredItem | null>(null);
+  const [deleteConfirmCategory, setDeleteConfirmCategory] = useState<UrlMonitorCategory | null>(null);
 
   // Add/Edit Form State
   const [formCategoryId, setFormCategoryId] = useState<string>('');
   const [formTitle, setFormTitle] = useState('');
   const [formUrl, setFormUrl] = useState('');
+  const [formIsTracked, setFormIsTracked] = useState<number>(1);
   const [formInterval, setFormInterval] = useState<number>(24);
   const [formNotes, setFormNotes] = useState('');
   const [isTestingUrl, setIsTestingUrl] = useState(false);
@@ -117,24 +121,42 @@ export const UrlMonitorView: React.FC = () => {
   const loadData = useCallback(async (preserveSelection = true) => {
     setIsLoading(true);
     try {
+      let hasChangesParam: string | undefined = undefined;
+      let isTrackedParam: string | undefined = undefined;
+
+      if (changeFilter === 'changed') {
+        hasChangesParam = '1';
+      } else if (changeFilter === 'tracked') {
+        isTrackedParam = '1';
+      } else if (changeFilter === 'untracked') {
+        isTrackedParam = '0';
+      }
+
       const [catsRes, itemsRes] = await Promise.all([
         api.getUrlCategories(),
         api.getUrlMonitoredItems({
           category_id: selectedCategoryId === 'all' ? undefined : selectedCategoryId,
-          has_changes: changeFilter === 'all' ? undefined : changeFilter === 'changed' ? '1' : '0',
+          has_changes: hasChangesParam,
           search: searchQuery || undefined
         })
       ]);
 
       if (catsRes.success) setCategories(catsRes.categories);
       if (itemsRes.success) {
-        setItems(itemsRes.items);
+        let filteredItems = itemsRes.items;
+        if (changeFilter === 'tracked') {
+          filteredItems = filteredItems.filter(i => i.is_tracked !== 0);
+        } else if (changeFilter === 'untracked') {
+          filteredItems = filteredItems.filter(i => i.is_tracked === 0);
+        }
+
+        setItems(filteredItems);
         setStats(itemsRes.stats);
 
         // Auto select first item if none selected or keep current selection
-        if (itemsRes.items.length > 0) {
-          if (!preserveSelection || !selectedItemId || !itemsRes.items.some(i => i.id === selectedItemId)) {
-            loadItemDetail(itemsRes.items[0].id);
+        if (filteredItems.length > 0) {
+          if (!preserveSelection || !selectedItemId || !filteredItems.some(i => i.id === selectedItemId)) {
+            loadItemDetail(filteredItems[0].id);
           } else {
             loadItemDetail(selectedItemId);
           }
@@ -159,7 +181,6 @@ export const UrlMonitorView: React.FC = () => {
   const loadItemDetail = async (id: number) => {
     setSelectedItemId(id);
     setIsDetailLoading(true);
-    setSelectedHistorySnapshot(null);
     try {
       const res = await api.getUrlMonitoredItemById(id);
       if (res.success) {
@@ -181,9 +202,7 @@ export const UrlMonitorView: React.FC = () => {
       if (res.success) {
         showToast(res.message);
         setSelectedItemDetail(res);
-        // Refresh item in list
         setItems(prev => prev.map(item => (item.id === id ? res.item : item)));
-        // Refresh stats
         const itemsRes = await api.getUrlMonitoredItems();
         if (itemsRes.success) setStats(itemsRes.stats);
       } else {
@@ -212,6 +231,25 @@ export const UrlMonitorView: React.FC = () => {
     }
   };
 
+  // Toggle URL Item Tracking (Takip Et / Takip Etme)
+  const handleToggleTracking = async (id: number) => {
+    setIsTogglingTrack(true);
+    try {
+      const res = await api.toggleUrlItemTracking(id);
+      if (res.success) {
+        showToast(res.message);
+        await loadData(true);
+        if (selectedItemId === id) {
+          loadItemDetail(id);
+        }
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Takip durumu değiştirilemedi', 'error');
+    } finally {
+      setIsTogglingTrack(false);
+    }
+  };
+
   // Acknowledge Changes (Set Current as New Baseline)
   const handleAcknowledge = async (id: number) => {
     setIsAcknowledging(true);
@@ -221,7 +259,6 @@ export const UrlMonitorView: React.FC = () => {
         showToast('Değişiklik onaylandı ve yeni referans olarak kaydedildi.');
         setSelectedItemDetail(res);
         setItems(prev => prev.map(item => (item.id === id ? res.item : item)));
-        // Update stats
         setStats(prev => ({
           ...prev,
           changedItemsCount: Math.max(0, prev.changedItemsCount - 1)
@@ -237,9 +274,16 @@ export const UrlMonitorView: React.FC = () => {
   // Open Add/Edit Modal
   const openAddModal = () => {
     setEditingItem(null);
-    setFormCategoryId(selectedCategoryId !== 'all' && selectedCategoryId !== 'uncategorized' ? String(selectedCategoryId) : (categories[0]?.id ? String(categories[0].id) : ''));
+    setFormCategoryId(
+      selectedCategoryId !== 'all' && selectedCategoryId !== 'uncategorized'
+        ? String(selectedCategoryId)
+        : categories[0]?.id
+        ? String(categories[0].id)
+        : ''
+    );
     setFormTitle('');
     setFormUrl('');
+    setFormIsTracked(1);
     setFormInterval(24);
     setFormNotes('');
     setTestResult(null);
@@ -251,6 +295,7 @@ export const UrlMonitorView: React.FC = () => {
     setFormCategoryId(item.category_id ? String(item.category_id) : '');
     setFormTitle(item.title);
     setFormUrl(item.url);
+    setFormIsTracked(item.is_tracked !== undefined ? item.is_tracked : 1);
     setFormInterval(item.check_interval_hours || 24);
     setFormNotes(item.notes || '');
     setTestResult(null);
@@ -304,14 +349,15 @@ export const UrlMonitorView: React.FC = () => {
     try {
       if (editingItem?.id) {
         // Update
-        const res = await api.updateUrlMonitoredItem(editingItem.id, {
+        await api.updateUrlMonitoredItem(editingItem.id, {
           category_id: formCategoryId ? Number(formCategoryId) : null,
           title: formTitle.trim() || formUrl.trim(),
           url: formUrl.trim(),
+          is_tracked: formIsTracked,
           check_interval_hours: Number(formInterval),
           notes: formNotes
         });
-        showToast('URL takip kaydı güncellendi.');
+        showToast('URL kaydı güncellendi.');
         setIsAddEditModalOpen(false);
         await loadData(true);
         if (selectedItemId === editingItem.id) {
@@ -323,11 +369,12 @@ export const UrlMonitorView: React.FC = () => {
           category_id: formCategoryId ? Number(formCategoryId) : null,
           title: formTitle.trim(),
           url: formUrl.trim(),
+          is_tracked: formIsTracked,
           check_interval_hours: Number(formInterval),
           notes: formNotes,
           initial_content: testResult?.success ? testResult.text : undefined
         });
-        showToast('Yeni URL başarıyla takibe alındı ve ilk snapshot kaydedildi.');
+        showToast(formIsTracked === 1 ? 'URL takibe alındı ve ilk snapshot kaydedildi.' : 'URL yer imi olarak eklendi.');
         setIsAddEditModalOpen(false);
         await loadData(false);
         if (res.item?.id) {
@@ -344,7 +391,7 @@ export const UrlMonitorView: React.FC = () => {
     if (!deleteConfirmItem) return;
     try {
       await api.deleteUrlMonitoredItem(deleteConfirmItem.id);
-      showToast(`"${deleteConfirmItem.title}" takip listesinden silindi.`);
+      showToast(`"${deleteConfirmItem.title}" listeden silindi.`);
       setDeleteConfirmItem(null);
       if (selectedItemId === deleteConfirmItem.id) {
         setSelectedItemId(null);
@@ -391,14 +438,13 @@ export const UrlMonitorView: React.FC = () => {
     }
   };
 
-  const handleDeleteCategory = async (id: number) => {
-    if (!confirm('Bu kategoriyi silmek istediğinize emin misiniz? Bu kategoriye ait URL\'lerin kategori bağlantısı kaldırılacaktır.')) {
-      return;
-    }
+  const handleDeleteCategory = async () => {
+    if (!deleteConfirmCategory) return;
     try {
-      await api.deleteUrlCategory(id);
-      showToast('Kategori silindi.');
-      if (selectedCategoryId === id) setSelectedCategoryId('all');
+      await api.deleteUrlCategory(deleteConfirmCategory.id);
+      showToast(`"${deleteConfirmCategory.name}" kategorisi silindi.`);
+      if (selectedCategoryId === deleteConfirmCategory.id) setSelectedCategoryId('all');
+      setDeleteConfirmCategory(null);
       const catsRes = await api.getUrlCategories();
       if (catsRes.success) setCategories(catsRes.categories);
       await loadData(true);
@@ -438,6 +484,7 @@ export const UrlMonitorView: React.FC = () => {
 
   // Active item detail references
   const currentItem = selectedItemDetail?.item;
+  const isCurrentItemTracked = currentItem ? currentItem.is_tracked !== 0 : false;
   const currentDiff = selectedItemDetail?.baselineDiff;
   const diffLines = currentDiff?.diffLines || [];
 
@@ -464,7 +511,7 @@ export const UrlMonitorView: React.FC = () => {
               </span>
             </h1>
             <p className="text-xs text-slate-500">
-              Kategori bazlı URL'leri takip edin, kaydedilen tarihten bu yana meydana gelen tüm içerik değişimlerini anında görüntüleyin.
+              Kategori bazlı URL'leri düzenleyin, takip durumunu belirleyin ve değişiklikleri satır satır inceleyin.
             </p>
           </div>
         </div>
@@ -500,17 +547,17 @@ export const UrlMonitorView: React.FC = () => {
           <button
             onClick={() => setIsCategoryModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-200 transition-colors cursor-pointer"
-            title="Kategorileri Düzenle"
+            title="Kategorileri Düzenle / Sil"
           >
             <Tag className="w-3.5 h-3.5 text-slate-600" />
-            <span>Kategoriler</span>
+            <span>Kategorileri Yönet ({categories.length})</span>
           </button>
 
           <button
             onClick={handleCheckAll}
             disabled={isCheckingAll || items.length === 0}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white rounded-lg text-xs font-semibold transition-colors shadow-xs cursor-pointer"
-            title="Tüm aktif URL'leri hemen canlı tara ve değişimleri tespit et"
+            title="Tüm takip edilen aktif URL'leri hemen canlı tara"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isCheckingAll ? 'animate-spin' : ''}`} />
             <span>{isCheckingAll ? 'Taranıyor...' : 'Tümünü Kontrol Et'}</span>
@@ -527,7 +574,7 @@ export const UrlMonitorView: React.FC = () => {
       </div>
 
       {/* ======================================================== */}
-      {/* 2-COLUMN MAIN CONTENT (LEFT: LIST, RIGHT: SIDEBAR DIFF) */}
+      {/* 2-COLUMN MAIN CONTENT (LEFT: LIST, RIGHT: SIDEBAR)       */}
       {/* ======================================================== */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
         {/* ====================================================== */}
@@ -560,12 +607,12 @@ export const UrlMonitorView: React.FC = () => {
               )}
             </div>
 
-            {/* Change Status Filters */}
+            {/* Tracking & Change Status Filter Bar */}
             <div className="flex items-center justify-between gap-1 text-xs">
-              <div className="flex items-center gap-1 bg-slate-200/70 p-0.5 rounded-lg">
+              <div className="flex items-center gap-1 bg-slate-200/70 p-0.5 rounded-lg overflow-x-auto no-scrollbar">
                 <button
                   onClick={() => setChangeFilter('all')}
-                  className={`px-2.5 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer ${
+                  className={`px-2 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
                     changeFilter === 'all'
                       ? 'bg-white text-slate-900 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
@@ -575,7 +622,7 @@ export const UrlMonitorView: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setChangeFilter('changed')}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer ${
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
                     changeFilter === 'changed'
                       ? 'bg-rose-50 text-rose-700 border border-rose-200 shadow-xs font-bold'
                       : 'text-slate-600 hover:text-rose-600'
@@ -585,23 +632,35 @@ export const UrlMonitorView: React.FC = () => {
                   <span>Değişenler ({stats.changedItemsCount})</span>
                 </button>
                 <button
-                  onClick={() => setChangeFilter('unchanged')}
-                  className={`px-2.5 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer ${
-                    changeFilter === 'unchanged'
-                      ? 'bg-white text-slate-900 shadow-xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
+                  onClick={() => setChangeFilter('tracked')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
+                    changeFilter === 'tracked'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-blue-600'
                   }`}
                 >
-                  Aynı ({Math.max(0, stats.totalItems - stats.changedItemsCount)})
+                  <Eye className="w-3 h-3" />
+                  <span>Takip Edilenler</span>
+                </button>
+                <button
+                  onClick={() => setChangeFilter('untracked')}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md font-medium text-[11px] transition-colors cursor-pointer whitespace-nowrap ${
+                    changeFilter === 'untracked'
+                      ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-xs font-bold'
+                      : 'text-slate-600 hover:text-amber-700'
+                  }`}
+                >
+                  <Bookmark className="w-3 h-3" />
+                  <span>Takip Edilmeyenler</span>
                 </button>
               </div>
 
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-400 shrink-0 font-medium">
                 {items.length} Kayıt
               </span>
             </div>
 
-            {/* Category Pills Slider */}
+            {/* Category Pills Slider with Quick Manage */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
               <button
                 onClick={() => setSelectedCategoryId('all')}
@@ -613,33 +672,69 @@ export const UrlMonitorView: React.FC = () => {
               >
                 Tüm Kategoriler
               </button>
-              {categories.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategoryId(cat.id)}
-                  className={`whitespace-nowrap flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors cursor-pointer shrink-0 ${
-                    selectedCategoryId === cat.id
-                      ? 'text-white shadow-xs'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                  style={{
-                    backgroundColor: selectedCategoryId === cat.id ? (cat.color || '#2563eb') : undefined
-                  }}
-                >
-                  <span
-                    className="w-2 h-2 rounded-full"
+
+              {categories.map(cat => {
+                const isSelected = selectedCategoryId === cat.id;
+                return (
+                  <div
+                    key={cat.id}
+                    className={`whitespace-nowrap inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors shrink-0 ${
+                      isSelected
+                        ? 'text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
                     style={{
-                      backgroundColor: selectedCategoryId === cat.id ? '#ffffff' : (cat.color || '#2563eb')
+                      backgroundColor: isSelected ? (cat.color || '#2563eb') : undefined
                     }}
-                  />
-                  <span>{cat.name}</span>
-                  <span className={`text-[10px] px-1 rounded-full ${
-                    selectedCategoryId === cat.id ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
-                  }`}>
-                    {cat.item_count || 0}
-                  </span>
-                </button>
-              ))}
+                  >
+                    <button
+                      onClick={() => setSelectedCategoryId(cat.id)}
+                      className="flex items-center gap-1 cursor-pointer"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{
+                          backgroundColor: isSelected ? '#ffffff' : (cat.color || '#2563eb')
+                        }}
+                      />
+                      <span>{cat.name}</span>
+                      <span
+                        className={`text-[10px] px-1 rounded-full ${
+                          isSelected ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {cat.item_count || 0}
+                      </span>
+                    </button>
+
+                    {/* Quick Edit Category Action in Pill */}
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setEditingCatId(cat.id);
+                        setEditCatName(cat.name);
+                        setEditCatColor(cat.color || '#2563eb');
+                        setIsCategoryModalOpen(true);
+                      }}
+                      className={`p-0.5 rounded transition-colors hover:scale-110 cursor-pointer ${
+                        isSelected ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:text-slate-700'
+                      }`}
+                      title={`"${cat.name}" kategorisini düzenle / sil`}
+                    >
+                      <Edit3 className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
+
+              <button
+                onClick={() => setIsCategoryModalOpen(true)}
+                className="whitespace-nowrap flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 border border-dashed border-slate-300 transition-colors cursor-pointer shrink-0"
+                title="Yeni Kategori Ekle veya Yönet"
+              >
+                <Plus className="w-3 h-3 text-slate-500" />
+                <span>Kategori Ekle</span>
+              </button>
             </div>
           </div>
 
@@ -656,11 +751,11 @@ export const UrlMonitorView: React.FC = () => {
                   <Globe className="w-5 h-5" />
                 </div>
                 <div className="space-y-1">
-                  <h3 className="text-xs font-bold text-slate-800">Takip Edilen URL Bulunamadı</h3>
+                  <h3 className="text-xs font-bold text-slate-800">URL Kaydı Bulunamadı</h3>
                   <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
                     {searchQuery || selectedCategoryId !== 'all' || changeFilter !== 'all'
                       ? 'Filtreleme kriterlerinize uygun kayıt bulunamadı.'
-                      : 'Henüz takip etmek istediğiniz bir web adresi eklemediniz.'}
+                      : 'Henüz bir web adresi eklemediniz.'}
                   </p>
                 </div>
                 <button
@@ -674,7 +769,8 @@ export const UrlMonitorView: React.FC = () => {
             ) : (
               items.map(item => {
                 const isSelected = selectedItemId === item.id;
-                const hasChange = item.has_changes === 1;
+                const isTracked = item.is_tracked !== 0;
+                const hasChange = isTracked && item.has_changes === 1;
 
                 return (
                   <div
@@ -685,13 +781,19 @@ export const UrlMonitorView: React.FC = () => {
                         ? 'bg-blue-50/50 border-blue-400 shadow-sm ring-1 ring-blue-400/30'
                         : hasChange
                         ? 'bg-rose-50/30 border-rose-200 hover:border-rose-300 hover:bg-rose-50/50'
+                        : !isTracked
+                        ? 'bg-slate-50/40 border-slate-200 hover:border-slate-300 hover:bg-slate-100/60'
                         : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/70'
                     }`}
                   >
                     {/* Status indicator bar on left */}
                     <div
                       className={`absolute left-0 top-3 bottom-3 w-1 rounded-r-full ${
-                        hasChange ? 'bg-rose-500' : 'bg-emerald-500'
+                        !isTracked
+                          ? 'bg-slate-300'
+                          : hasChange
+                          ? 'bg-rose-500'
+                          : 'bg-emerald-500'
                       }`}
                     />
 
@@ -715,13 +817,26 @@ export const UrlMonitorView: React.FC = () => {
                             </span>
                           )}
 
-                          <span className="text-[10px] text-slate-400">
-                            Her {item.check_interval_hours || 24}s
-                          </span>
+                          {isTracked ? (
+                            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+                              <Clock className="w-2.5 h-2.5" />
+                              <span>Her {item.check_interval_hours || 24}s</span>
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded flex items-center gap-1">
+                              <Bookmark className="w-2.5 h-2.5" />
+                              <span>Yer İmi</span>
+                            </span>
+                          )}
                         </div>
 
-                        {/* Change Status Badge */}
-                        {hasChange ? (
+                        {/* Change / Tracking Status Badge */}
+                        {!isTracked ? (
+                          <span className="flex items-center gap-1 text-[10px] font-medium text-slate-600 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full shrink-0">
+                            <EyeOff className="w-3 h-3 text-slate-400" />
+                            <span>Takip Kapalı</span>
+                          </span>
+                        ) : hasChange ? (
                           <span className="flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded-full shrink-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-pulse"></span>
                             <span>Değişiklik Var</span>
@@ -756,13 +871,15 @@ export const UrlMonitorView: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Change Summary Snippet if changed */}
-                      {item.change_summary && (
-                        <div className={`text-[11px] px-2 py-1 rounded-md font-medium ${
-                          hasChange
-                            ? 'bg-rose-100/60 text-rose-800 border border-rose-200/60'
-                            : 'bg-slate-100/80 text-slate-600'
-                        }`}>
+                      {/* Change Summary Snippet if changed and tracked */}
+                      {isTracked && item.change_summary && (
+                        <div
+                          className={`text-[11px] px-2 py-1 rounded-md font-medium ${
+                            hasChange
+                              ? 'bg-rose-100/60 text-rose-800 border border-rose-200/60'
+                              : 'bg-slate-100/80 text-slate-600'
+                          }`}
+                        >
                           {item.change_summary}
                         </div>
                       )}
@@ -770,23 +887,48 @@ export const UrlMonitorView: React.FC = () => {
                       {/* Bottom Row: Dates & Quick Action buttons */}
                       <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
                         <div className="flex items-center gap-2">
-                          <span title="Son Kontrol Tarihi">
-                            Kontrol: <strong className="text-slate-600 font-semibold">{formatDate(item.last_checked_at)}</strong>
-                          </span>
+                          {isTracked ? (
+                            <span title="Son Kontrol Tarihi">
+                              Kontrol: <strong className="text-slate-600 font-semibold">{formatDate(item.last_checked_at)}</strong>
+                            </span>
+                          ) : (
+                            <span>
+                              Kayıt: <strong className="text-slate-600 font-semibold">{formatDate(item.created_at)}</strong>
+                            </span>
+                          )}
                         </div>
 
                         {/* Action buttons */}
                         <div className="flex items-center gap-1 opacity-90 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                          {/* Quick Toggle Tracking Button */}
                           <button
                             onClick={e => {
                               e.stopPropagation();
-                              handleCheckSingle(item.id);
+                              handleToggleTracking(item.id);
                             }}
-                            className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded text-slate-500 transition-colors"
-                            title="Şimdi Canlı Kontrol Et"
+                            className={`p-1 rounded transition-colors ${
+                              isTracked
+                                ? 'hover:text-amber-700 hover:bg-amber-50 text-slate-400'
+                                : 'hover:text-blue-600 hover:bg-blue-50 text-blue-600'
+                            }`}
+                            title={isTracked ? 'Takibi Durdur (Yer İmine Dönüştür)' : 'Takibi Başlat (Değişiklikleri İzle)'}
                           >
-                            <RefreshCw className="w-3 h-3" />
+                            {isTracked ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                           </button>
+
+                          {isTracked && (
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleCheckSingle(item.id);
+                              }}
+                              className="p-1 hover:text-blue-600 hover:bg-blue-50 rounded text-slate-500 transition-colors"
+                              title="Şimdi Canlı Kontrol Et"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                            </button>
+                          )}
+
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -797,6 +939,7 @@ export const UrlMonitorView: React.FC = () => {
                           >
                             <Edit3 className="w-3 h-3" />
                           </button>
+
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -823,7 +966,7 @@ export const UrlMonitorView: React.FC = () => {
         <div className="lg:col-span-7 flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden h-full">
           {selectedItemId && currentItem ? (
             <div className="flex flex-col h-full overflow-hidden">
-              {/* Detail Sidebar Header */}
+              {/* Detail Header */}
               <div className="p-4 border-b border-slate-200 bg-slate-50/80 shrink-0 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1 min-w-0 flex-1">
@@ -844,8 +987,13 @@ export const UrlMonitorView: React.FC = () => {
                         </span>
                       )}
 
-                      {/* Change Status Badge */}
-                      {currentItem.has_changes === 1 ? (
+                      {/* Change Status or Untracked Status Badge */}
+                      {!isCurrentItemTracked ? (
+                        <span className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                          <Bookmark className="w-3 h-3 text-amber-700" />
+                          <span>Takip Kapalı (Yer İmi)</span>
+                        </span>
+                      ) : currentItem.has_changes === 1 ? (
                         <span className="flex items-center gap-1.5 text-[11px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2.5 py-0.5 rounded-full">
                           <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse"></span>
                           <span>Değişiklik Tespit Edildi</span>
@@ -857,9 +1005,11 @@ export const UrlMonitorView: React.FC = () => {
                         </span>
                       )}
 
-                      <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                        HTTP {currentItem.http_status || 200}
-                      </span>
+                      {isCurrentItemTracked && (
+                        <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                          HTTP {currentItem.http_status || 200}
+                        </span>
+                      )}
                     </div>
 
                     <h2 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight line-clamp-1">
@@ -882,27 +1032,56 @@ export const UrlMonitorView: React.FC = () => {
 
                   {/* Sidebar Action Buttons */}
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => handleCheckSingle(currentItem.id)}
-                      disabled={isCheckingSingle}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                      title="Bu URL'yi hemen canlı tara"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isCheckingSingle ? 'animate-spin' : ''}`} />
-                      <span className="hidden sm:inline">{isCheckingSingle ? 'Taranıyor...' : 'Şimdi Tara'}</span>
-                    </button>
+                    {/* If Tracked -> Check Single & Acknowledge */}
+                    {isCurrentItemTracked && (
+                      <>
+                        <button
+                          onClick={() => handleCheckSingle(currentItem.id)}
+                          disabled={isCheckingSingle}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                          title="Bu URL'yi hemen canlı tara"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isCheckingSingle ? 'animate-spin' : ''}`} />
+                          <span className="hidden sm:inline">{isCheckingSingle ? 'Taranıyor...' : 'Şimdi Tara'}</span>
+                        </button>
 
-                    {currentItem.has_changes === 1 && (
-                      <button
-                        onClick={() => handleAcknowledge(currentItem.id)}
-                        disabled={isAcknowledging}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                        title="Bu değişikliği onayla ve mevcut içeriği yeni referans (baseline) yap"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Değişikliği Onayla</span>
-                      </button>
+                        {currentItem.has_changes === 1 && (
+                          <button
+                            onClick={() => handleAcknowledge(currentItem.id)}
+                            disabled={isAcknowledging}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                            title="Bu değişikliği onayla ve mevcut içeriği yeni referans yap"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Değişikliği Onayla</span>
+                          </button>
+                        )}
+                      </>
                     )}
+
+                    {/* Toggle Tracking Quick Button */}
+                    <button
+                      onClick={() => handleToggleTracking(currentItem.id)}
+                      disabled={isTogglingTrack}
+                      className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
+                        isCurrentItemTracked
+                          ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                          : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600 shadow-xs'
+                      }`}
+                      title={isCurrentItemTracked ? 'Otomatik takibi durdur' : 'Değişiklik takibini başlat'}
+                    >
+                      {isCurrentItemTracked ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Takibi Durdur</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5" />
+                          <span>Takibi Başlat</span>
+                        </>
+                      )}
+                    </button>
 
                     <button
                       onClick={() => openEditModal(currentItem)}
@@ -915,119 +1094,200 @@ export const UrlMonitorView: React.FC = () => {
                     <button
                       onClick={() => setDeleteConfirmItem(currentItem)}
                       className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs transition-colors cursor-pointer"
-                      title="URL Takibini Sil"
+                      title="URL Kaydını Sil"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
 
-                {/* Important Dates Summary Card */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium block">İlk Referans Kaydı</span>
-                    <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-slate-400" />
-                      {formatDate(currentItem.created_at)}
-                    </span>
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium block">Son Değişim Tarihi</span>
-                    <span className={`font-bold text-[11px] flex items-center gap-1 ${
-                      currentItem.has_changes ? 'text-rose-600 font-extrabold' : 'text-slate-700'
-                    }`}>
-                      <Clock className="w-3 h-3 text-slate-400" />
-                      {formatDate(currentItem.last_changed_at)}
-                    </span>
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium block">Son Kontrol Zamanı</span>
-                    <span className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                      {formatDate(currentItem.last_checked_at)}
-                    </span>
-                  </div>
-
-                  <div className="space-y-0.5">
-                    <span className="text-[10px] text-slate-400 font-medium block">Kontrol Sıklığı</span>
-                    <span className="font-bold text-slate-700 text-[11px]">
-                      Her {currentItem.check_interval_hours || 24} Saatte Bir
-                    </span>
-                  </div>
-                </div>
-
-                {/* Navigation Tabs for Sidebar */}
-                <div className="flex items-center justify-between border-b border-slate-200 pt-1">
-                  <div className="flex items-center gap-4 text-xs font-semibold">
-                    <button
-                      onClick={() => setActiveSidebarTab('diff')}
-                      className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        activeSidebarTab === 'diff'
-                          ? 'border-blue-600 text-blue-600'
-                          : 'border-transparent text-slate-500 hover:text-slate-900'
-                      }`}
-                    >
-                      <Layers className="w-4 h-4" />
-                      <span>Değişiklik Görünümü (Diff)</span>
-                      {currentDiff && currentDiff.hasChanged && (
-                        <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
-                          +{currentDiff.addedCount} / -{currentDiff.removedCount}
+                {/* Tracking vs Non-Tracking Content */}
+                {isCurrentItemTracked ? (
+                  <>
+                    {/* Important Dates Summary Card */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded-lg border border-slate-200 text-xs">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] text-slate-400 font-medium block">İlk Referans Kaydı</span>
+                        <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          {formatDate(currentItem.created_at)}
                         </span>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] text-slate-400 font-medium block">Son Değişim Tarihi</span>
+                        <span
+                          className={`font-bold text-[11px] flex items-center gap-1 ${
+                            currentItem.has_changes ? 'text-rose-600 font-extrabold' : 'text-slate-700'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          {formatDate(currentItem.last_changed_at)}
+                        </span>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] text-slate-400 font-medium block">Son Kontrol Zamanı</span>
+                        <span className="font-bold text-slate-700 text-[11px] flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-500" />
+                          {formatDate(currentItem.last_checked_at)}
+                        </span>
+                      </div>
+
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] text-slate-400 font-medium block">Kontrol Sıklığı</span>
+                        <span className="font-bold text-slate-700 text-[11px]">
+                          Her {currentItem.check_interval_hours || 24} Saatte Bir
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Navigation Tabs for Sidebar */}
+                    <div className="flex items-center justify-between border-b border-slate-200 pt-1">
+                      <div className="flex items-center gap-4 text-xs font-semibold">
+                        <button
+                          onClick={() => setActiveSidebarTab('diff')}
+                          className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                            activeSidebarTab === 'diff'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          <Layers className="w-4 h-4" />
+                          <span>Değişiklik Görünümü (Diff)</span>
+                          {currentDiff && currentDiff.hasChanged && (
+                            <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                              +{currentDiff.addedCount} / -{currentDiff.removedCount}
+                            </span>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => setActiveSidebarTab('history')}
+                          className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                            activeSidebarTab === 'history'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          <History className="w-4 h-4" />
+                          <span>Kontrol Geçmişi</span>
+                          <span className="bg-slate-200 text-slate-700 text-[9px] px-1.5 py-0.2 rounded-full font-bold">
+                            {selectedItemDetail?.history.length || 0}
+                          </span>
+                        </button>
+
+                        <button
+                          onClick={() => setActiveSidebarTab('preview')}
+                          className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
+                            activeSidebarTab === 'preview'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span>Son Sayfa Metni</span>
+                        </button>
+                      </div>
+
+                      {activeSidebarTab === 'diff' && (
+                        <button
+                          onClick={() => setDiffFilterOnlyChanges(!diffFilterOnlyChanges)}
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                            diffFilterOnlyChanges
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Filter className="w-3 h-3" />
+                          <span>{diffFilterOnlyChanges ? 'Sadece Değişenler' : 'Tüm Satırlar'}</span>
+                        </button>
                       )}
-                    </button>
-
-                    <button
-                      onClick={() => setActiveSidebarTab('history')}
-                      className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        activeSidebarTab === 'history'
-                          ? 'border-blue-600 text-blue-600'
-                          : 'border-transparent text-slate-500 hover:text-slate-900'
-                      }`}
-                    >
-                      <History className="w-4 h-4" />
-                      <span>Kontrol Geçmişi</span>
-                      <span className="bg-slate-200 text-slate-700 text-[9px] px-1.5 py-0.2 rounded-full font-bold">
-                        {selectedItemDetail?.history.length || 0}
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() => setActiveSidebarTab('preview')}
-                      className={`pb-2 border-b-2 transition-colors cursor-pointer flex items-center gap-1.5 ${
-                        activeSidebarTab === 'preview'
-                          ? 'border-blue-600 text-blue-600'
-                          : 'border-transparent text-slate-500 hover:text-slate-900'
-                      }`}
-                    >
-                      <FileText className="w-4 h-4" />
-                      <span>Son Sayfa Metni</span>
-                    </button>
-                  </div>
-
-                  {activeSidebarTab === 'diff' && (
-                    <button
-                      onClick={() => setDiffFilterOnlyChanges(!diffFilterOnlyChanges)}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
-                        diffFilterOnlyChanges
-                          ? 'bg-blue-50 text-blue-700 border-blue-200'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Filter className="w-3 h-3" />
-                      <span>{diffFilterOnlyChanges ? 'Sadece Değişenler' : 'Tüm Satırlar'}</span>
-                    </button>
-                  )}
-                </div>
+                    </div>
+                  </>
+                ) : null}
               </div>
 
-              {/* Sidebar Tab Content Area */}
+              {/* ====================================================== */}
+              {/* SIDEBAR MAIN CONTENT                                   */}
+              {/* ====================================================== */}
               <div className="flex-1 overflow-y-auto p-4">
                 {isDetailLoading ? (
                   <div className="py-20 text-center space-y-2">
                     <RefreshCw className="w-6 h-6 text-blue-600 animate-spin mx-auto" />
-                    <p className="text-xs text-slate-500 font-medium">Değişiklik analizi hazırlanıyor...</p>
+                    <p className="text-xs text-slate-500 font-medium">Bilgiler hazırlanıyor...</p>
+                  </div>
+                ) : !isCurrentItemTracked ? (
+                  /* ================================================== */
+                  /* UNTRACKED URL VIEW (NO SCANNING HISTORY DISPLAYED) */
+                  /* ================================================== */
+                  <div className="space-y-5 max-w-2xl mx-auto py-2">
+                    {/* Notice Banner */}
+                    <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-xl space-y-2 shadow-xs">
+                      <div className="flex items-center gap-2 text-amber-900 font-bold text-sm">
+                        <Bookmark className="w-4 h-4 text-amber-700" />
+                        <span>Takip Etme Modu Aktif (Sadece Yer İmi)</span>
+                      </div>
+                      <p className="text-xs text-amber-800/90 leading-relaxed">
+                        Bu URL adresi yer imi ve hızlı erişim amacıyla listelenmektedir. Sayfa arka planda taranmaz, içerik diff karşılaştırması yapılmaz ve tarama geçmişi tutulmaz.
+                      </p>
+                      <div className="pt-2">
+                        <button
+                          onClick={() => handleToggleTracking(currentItem.id)}
+                          disabled={isTogglingTrack}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          <span>Bu URL İçin Takibi Başlat (Değişiklikleri İzle)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick Access Card */}
+                    <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
+                      <div className="font-bold text-slate-900 text-xs uppercase tracking-wider text-slate-400">
+                        URL Detayları & Hızlı Erişim
+                      </div>
+
+                      <div className="space-y-3 text-xs">
+                        <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                          <div className="min-w-0 flex-1 pr-2">
+                            <span className="text-[10px] text-slate-400 font-medium block">Web Adresi</span>
+                            <span className="font-mono text-slate-800 text-xs truncate block">{currentItem.url}</span>
+                          </div>
+                          <a
+                            href={currentItem.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-slate-300 hover:border-blue-300 rounded-lg text-xs font-semibold transition-colors shrink-0 shadow-xs"
+                          >
+                            <span>Web Sitesine Git</span>
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                            <span className="text-[10px] text-slate-400 font-medium block">Kategori</span>
+                            <span className="font-bold text-slate-800 text-xs">
+                              {currentItem.category_name || 'Genel (Kategorisiz)'}
+                            </span>
+                          </div>
+
+                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80">
+                            <span className="text-[10px] text-slate-400 font-medium block">Kayıt Tarihi</span>
+                            <span className="font-bold text-slate-800 text-xs">{formatDate(currentItem.created_at)}</span>
+                          </div>
+                        </div>
+
+                        {currentItem.notes && (
+                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 space-y-1">
+                            <span className="text-[10px] text-slate-400 font-medium block">Kullanıcı Notları</span>
+                            <p className="text-xs text-slate-700 whitespace-pre-wrap">{currentItem.notes}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ) : activeSidebarTab === 'diff' ? (
                   /* ================================================== */
@@ -1058,7 +1318,7 @@ export const UrlMonitorView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Diff Lines Table / Container */}
+                    {/* Diff Lines Table */}
                     {diffLines.length === 0 ? (
                       <div className="py-12 text-center text-slate-500 text-xs bg-slate-50 rounded-xl border border-slate-200">
                         Karşılaştırma için henüz içerik verisi bulunmuyor. "Şimdi Tara" butonuna basarak sayfayı kontrol edebilirsiniz.
@@ -1078,7 +1338,6 @@ export const UrlMonitorView: React.FC = () => {
                           {displayedDiffLines.map((line, idx) => {
                             const isAdded = line.type === 'added';
                             const isRemoved = line.type === 'removed';
-                            const isUnchanged = line.type === 'unchanged';
 
                             return (
                               <div
@@ -1128,7 +1387,7 @@ export const UrlMonitorView: React.FC = () => {
                     </div>
 
                     <div className="relative pl-6 space-y-4 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                      {selectedItemDetail?.history.map((record, index) => {
+                      {selectedItemDetail?.history.map((record) => {
                         const isChanged = record.has_changed === 1 || record.change_type === 'changed';
                         const isInitial = record.change_type === 'initial';
                         const isError = record.change_type === 'error' || record.http_status >= 400;
@@ -1166,9 +1425,13 @@ export const UrlMonitorView: React.FC = () => {
                                   )}
                                 </div>
 
-                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                                  record.http_status === 200 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                                }`}>
+                                <span
+                                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                    record.http_status === 200
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : 'bg-rose-100 text-rose-800'
+                                  }`}
+                                >
                                   HTTP {record.http_status}
                                 </span>
                               </div>
@@ -1218,7 +1481,7 @@ export const UrlMonitorView: React.FC = () => {
               <div className="space-y-1 max-w-sm">
                 <h3 className="text-sm font-bold text-slate-900">Bir URL Seçin</h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Sol taraftaki listeden bir URL'ye tıklayarak sayfadaki değişiklikleri, eklenen/silinen satırları ve kontrol geçmişini bu sidebar panelinde detaylıca inceleyin.
+                  Sol taraftaki listeden bir URL'ye tıklayarak sayfa detaylarını, takip durumunu veya canlı diff değişimlerini görüntüleyin.
                 </p>
               </div>
               <button
@@ -1226,7 +1489,7 @@ export const UrlMonitorView: React.FC = () => {
                 className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>Yeni URL Takibi Başlat</span>
+                <span>Yeni URL Ekle</span>
               </button>
             </div>
           )}
@@ -1246,10 +1509,10 @@ export const UrlMonitorView: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">
-                    {editingItem?.id ? 'URL Takibini Düzenle' : 'Yeni Web Sayfası Takibi Ekle'}
+                    {editingItem?.id ? 'URL Kaydını Düzenle' : 'Yeni Web Sayfası Ekle'}
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    URL adresini girin, sistem otomatik olarak içeriği çekip ilk referans noktasını oluşturacaktır.
+                    URL adresini girin, takip etmek isteyip istemediğinizi seçin.
                   </p>
                 </div>
               </div>
@@ -1272,7 +1535,7 @@ export const UrlMonitorView: React.FC = () => {
                   <input
                     type="url"
                     required
-                    placeholder="https://www.ornek.com/fiyatlar-veya-oranlar"
+                    placeholder="https://www.ornek.com/sayfa-adresi"
                     value={formUrl}
                     onChange={e => setFormUrl(e.target.value)}
                     className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
@@ -1291,11 +1554,13 @@ export const UrlMonitorView: React.FC = () => {
 
               {/* Test Result Feedback Box */}
               {testResult && (
-                <div className={`p-3 rounded-lg border text-[11px] space-y-1 ${
-                  testResult.success
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
-                }`}>
+                <div
+                  className={`p-3 rounded-lg border text-[11px] space-y-1 ${
+                    testResult.success
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}
+                >
                   <div className="font-bold flex items-center gap-1">
                     {testResult.success ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
                     <span>{testResult.success ? 'Sayfa Başarıyla Çekildi!' : 'Bağlantı Hatası'}</span>
@@ -1310,13 +1575,67 @@ export const UrlMonitorView: React.FC = () => {
                 </div>
               )}
 
+              {/* TRACKING MODE SELECTION (Takip Et / Takip Etme) */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 block">Takip Seçeneği</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setFormIsTracked(1)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      formIsTracked === 1
+                        ? 'bg-blue-50/70 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          formIsTracked === 1 ? 'border-blue-600 bg-blue-600' : 'border-slate-300 bg-white'
+                        }`}
+                      >
+                        {formIsTracked === 1 && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <span className="font-bold text-xs text-slate-900">Aktif Olarak Takip Et</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1 pl-6">
+                      İçerik düzenli taranır, sayfa değişiklikleri tespit edilir ve diff geçmişi tutulur.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFormIsTracked(0)}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                      formIsTracked === 0
+                        ? 'bg-amber-50/70 border-amber-500 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          formIsTracked === 0 ? 'border-amber-600 bg-amber-600' : 'border-slate-300 bg-white'
+                        }`}
+                      >
+                        {formIsTracked === 0 && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <span className="font-bold text-xs text-slate-900">Takip Etme (Sadece Yer İmi)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1 pl-6">
+                      Otomatik tarama yapılmaz, tarama geçmişi ve diff gösterilmez.
+                    </p>
+                  </button>
+                </div>
+              </div>
+
               {/* Title & Category Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700">Takip Başlığı / Tanımı</label>
+                  <label className="font-bold text-slate-700">Başlık / Tanım</label>
                   <input
                     type="text"
-                    placeholder="Örn: Garanti Mevduat Faiz Oranları"
+                    placeholder="Örn: Garanti Faiz Oranları Sayfası"
                     value={formTitle}
                     onChange={e => setFormTitle(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
@@ -1332,44 +1651,48 @@ export const UrlMonitorView: React.FC = () => {
                   >
                     <option value="">Kategorisiz / Genel</option>
                     {categories.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* Check Interval */}
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Otomatik Kontrol Sıklığı</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { hours: 6, label: '6 Saat' },
-                    { hours: 12, label: '12 Saat' },
-                    { hours: 24, label: '24 Saat (Günlük)' },
-                    { hours: 48, label: '48 Saat' }
-                  ].map(opt => (
-                    <button
-                      key={opt.hours}
-                      type="button"
-                      onClick={() => setFormInterval(opt.hours)}
-                      className={`py-2 px-2 rounded-lg border text-center font-semibold text-[11px] transition-colors cursor-pointer ${
-                        formInterval === opt.hours
-                          ? 'bg-blue-50 border-blue-500 text-blue-700'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
+              {/* Check Interval (Only if tracked) */}
+              {formIsTracked === 1 && (
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">Otomatik Kontrol Sıklığı</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { hours: 6, label: '6 Saat' },
+                      { hours: 12, label: '12 Saat' },
+                      { hours: 24, label: '24 Saat (Günlük)' },
+                      { hours: 48, label: '48 Saat' }
+                    ].map(opt => (
+                      <button
+                        key={opt.hours}
+                        type="button"
+                        onClick={() => setFormInterval(opt.hours)}
+                        className={`py-2 px-2 rounded-lg border text-center font-semibold text-[11px] transition-colors cursor-pointer ${
+                          formInterval === opt.hours
+                            ? 'bg-blue-50 border-blue-500 text-blue-700'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Notes */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Notlar & Açıklama (İsteğe Bağlı)</label>
                 <textarea
                   rows={2}
-                  placeholder="Bu URL'deki hangi veri neden takip ediliyor..."
+                  placeholder="Bu URL hakkında notlar..."
                   value={formNotes}
                   onChange={e => setFormNotes(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
@@ -1389,7 +1712,7 @@ export const UrlMonitorView: React.FC = () => {
                   type="submit"
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-xs transition-colors cursor-pointer"
                 >
-                  {editingItem?.id ? 'Değişiklikleri Kaydet' : 'URL Takibini Başlat'}
+                  {editingItem?.id ? 'Değişiklikleri Kaydet' : formIsTracked === 1 ? 'URL Takibini Başlat' : 'Yer İmi Olarak Ekle'}
                 </button>
               </div>
             </form>
@@ -1398,7 +1721,7 @@ export const UrlMonitorView: React.FC = () => {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 2: CATEGORY MANAGEMENT MODAL                       */}
+      {/* MODAL 2: CATEGORY MANAGEMENT MODAL (EDIT / DELETE)       */}
       {/* ======================================================== */}
       {isCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -1409,12 +1732,17 @@ export const UrlMonitorView: React.FC = () => {
                   <Tag className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">URL Takip Kategorileri</h3>
-                  <p className="text-[11px] text-slate-500">Takip edilen URL'leri gruplandırmak için kategoriler</p>
+                  <h3 className="font-bold text-slate-900 text-sm">URL Kategorilerini Yönet</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Kategori adlarını ve renklerini düzenleyin veya silin
+                  </p>
                 </div>
               </div>
               <button
-                onClick={() => setIsCategoryModalOpen(false)}
+                onClick={() => {
+                  setIsCategoryModalOpen(false);
+                  setEditingCatId(null);
+                }}
                 className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
               >
                 <X className="w-5 h-5" />
@@ -1423,13 +1751,16 @@ export const UrlMonitorView: React.FC = () => {
 
             <div className="p-5 space-y-4 text-xs">
               {/* Add Category Form */}
-              <form onSubmit={handleCreateCategory} className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+              <form
+                onSubmit={handleCreateCategory}
+                className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3"
+              >
                 <span className="font-bold text-slate-800 text-xs block">Yeni Kategori Ekle</span>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     required
-                    placeholder="Örn: Kripto & Borsa, E-Devlet, İlanlar"
+                    placeholder="Örn: Finans, E-Devlet, İlanlar, Raporlar"
                     value={newCatName}
                     onChange={e => setNewCatName(e.target.value)}
                     className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none"
@@ -1440,6 +1771,7 @@ export const UrlMonitorView: React.FC = () => {
                       value={newCatColor}
                       onChange={e => setNewCatColor(e.target.value)}
                       className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent"
+                      title="Kategori Rengi Seç"
                     />
                   </div>
                   <button
@@ -1467,84 +1799,110 @@ export const UrlMonitorView: React.FC = () => {
                 </div>
               </form>
 
-              {/* Category List */}
+              {/* Category List with Edit & Delete */}
               <div className="space-y-2">
-                <span className="font-bold text-slate-800 text-xs block">Mevcut Kategoriler</span>
-                <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto rounded-lg border border-slate-200">
-                  {categories.map(cat => (
-                    <div key={cat.id} className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50">
-                      {editingCatId === cat.id ? (
-                        <div className="flex items-center gap-2 flex-1">
-                          <input
-                            type="text"
-                            value={editCatName}
-                            onChange={e => setEditCatName(e.target.value)}
-                            className="flex-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs"
-                          />
-                          <input
-                            type="color"
-                            value={editCatColor}
-                            onChange={e => setEditCatColor(e.target.value)}
-                            className="w-6 h-6 rounded cursor-pointer"
-                          />
-                          <button
-                            onClick={() => handleUpdateCategory(cat.id)}
-                            className="px-2 py-1 bg-emerald-600 text-white rounded text-xs font-semibold"
-                          >
-                            Kaydet
-                          </button>
-                          <button
-                            onClick={() => setEditingCatId(null)}
-                            className="px-2 py-1 bg-slate-200 text-slate-700 rounded text-xs"
-                          >
-                            İptal
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className="w-3 h-3 rounded-full shrink-0"
-                              style={{ backgroundColor: cat.color || '#2563eb' }}
-                            />
-                            <span className="font-bold text-slate-800">{cat.name}</span>
-                            <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded-full">
-                              {cat.item_count || 0} URL
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => {
-                                setEditingCatId(cat.id);
-                                setEditCatName(cat.name);
-                                setEditCatColor(cat.color || '#2563eb');
-                              }}
-                              className="p-1 text-slate-500 hover:text-blue-600 rounded"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="p-1 text-slate-500 hover:text-rose-600 rounded"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </>
-                      )}
+                <span className="font-bold text-slate-800 text-xs block">
+                  Mevcut Kategoriler ({categories.length})
+                </span>
+                <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto rounded-lg border border-slate-200">
+                  {categories.length === 0 ? (
+                    <div className="p-4 text-center text-slate-400 text-xs">
+                      Henüz oluşturulmuş kategori bulunmuyor.
                     </div>
-                  ))}
+                  ) : (
+                    categories.map(cat => (
+                      <div
+                        key={cat.id}
+                        className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 transition-colors"
+                      >
+                        {editingCatId === cat.id ? (
+                          /* INLINE EDIT CATEGORY FORM */
+                          <div className="flex items-center gap-2 flex-1 animate-in fade-in duration-100">
+                            <input
+                              type="text"
+                              required
+                              value={editCatName}
+                              onChange={e => setEditCatName(e.target.value)}
+                              className="flex-1 px-2.5 py-1 bg-white border border-blue-400 rounded-lg text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              placeholder="Kategori adı"
+                            />
+                            <div className="flex items-center gap-1 bg-white px-1.5 py-0.5 rounded-lg border border-slate-300 shrink-0">
+                              <input
+                                type="color"
+                                value={editCatColor}
+                                onChange={e => setEditCatColor(e.target.value)}
+                                className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent"
+                              />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateCategory(cat.id)}
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shrink-0 cursor-pointer"
+                            >
+                              Kaydet
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCatId(null)}
+                              className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-medium shrink-0 cursor-pointer"
+                            >
+                              İptal
+                            </button>
+                          </div>
+                        ) : (
+                          /* DISPLAY CATEGORY ROW */
+                          <>
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span
+                                className="w-3.5 h-3.5 rounded-full shrink-0 shadow-xs"
+                                style={{ backgroundColor: cat.color || '#2563eb' }}
+                              />
+                              <span className="font-bold text-slate-800 text-xs truncate">{cat.name}</span>
+                              <span className="text-[10px] text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded-full shrink-0 font-semibold">
+                                {cat.item_count || 0} URL
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingCatId(cat.id);
+                                  setEditCatName(cat.name);
+                                  setEditCatColor(cat.color || '#2563eb');
+                                }}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                title="Kategoriyi Düzenle (İsim & Renk)"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmCategory(cat)}
+                                className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Kategoriyi Sil"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
 
               <div className="flex items-center justify-end pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsCategoryModalOpen(false)}
+                  onClick={() => {
+                    setIsCategoryModalOpen(false);
+                    setEditingCatId(null);
+                  }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-semibold cursor-pointer"
                 >
-                  Tamam
+                  Kapat
                 </button>
               </div>
             </div>
@@ -1553,7 +1911,7 @@ export const UrlMonitorView: React.FC = () => {
       )}
 
       {/* ======================================================== */}
-      {/* MODAL 3: DELETE CONFIRMATION MODAL                       */}
+      {/* MODAL 3: DELETE URL CONFIRMATION MODAL                   */}
       {/* ======================================================== */}
       {deleteConfirmItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -1564,8 +1922,8 @@ export const UrlMonitorView: React.FC = () => {
                   <AlertCircle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-sm">URL Takibini Sil</h3>
-                  <p className="text-[11px] text-slate-500">Takip Listesinden Kaldırma</p>
+                  <h3 className="font-bold text-slate-900 text-sm">URL Kaydını Sil</h3>
+                  <p className="text-[11px] text-slate-500">Listeden Kaldırma Onayı</p>
                 </div>
               </div>
               <button
@@ -1578,16 +1936,12 @@ export const UrlMonitorView: React.FC = () => {
 
             <div className="p-5 space-y-4 text-xs">
               <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200/80 space-y-1">
-                <div className="font-bold text-slate-900 text-sm">
-                  {deleteConfirmItem.title}
-                </div>
-                <div className="font-mono text-[11px] text-slate-500 truncate">
-                  {deleteConfirmItem.url}
-                </div>
+                <div className="font-bold text-slate-900 text-sm">{deleteConfirmItem.title}</div>
+                <div className="font-mono text-[11px] text-slate-500 truncate">{deleteConfirmItem.url}</div>
               </div>
 
               <p className="text-slate-600 leading-relaxed">
-                Bu URL ve kaydedilen tüm kontrol geçmişi & snapshot fark kayıtları kalıcı olarak silinecektir. Devam etmek istiyor musunuz?
+                Bu URL ve kaydedilen tüm geçmiş kayıtları kalıcı olarak silinecektir. Devam etmek istiyor musunuz?
               </p>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
@@ -1605,6 +1959,68 @@ export const UrlMonitorView: React.FC = () => {
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Evet, Sil</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL 4: DELETE CATEGORY CONFIRMATION MODAL              */}
+      {/* ======================================================== */}
+      {deleteConfirmCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-rose-100 bg-rose-50/70 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-rose-100 text-rose-700 rounded-lg">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">Kategoriyi Sil</h3>
+                  <p className="text-[11px] text-slate-500">Kategori Silme Onayı</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setDeleteConfirmCategory(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 rounded-lg border border-slate-200/80 flex items-center gap-2.5">
+                <span
+                  className="w-4 h-4 rounded-full shrink-0"
+                  style={{ backgroundColor: deleteConfirmCategory.color || '#2563eb' }}
+                />
+                <span className="font-bold text-slate-900 text-sm">{deleteConfirmCategory.name}</span>
+                <span className="text-[10px] text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full font-semibold ml-auto">
+                  {deleteConfirmCategory.item_count || 0} URL Bağlı
+                </span>
+              </div>
+
+              <p className="text-slate-600 leading-relaxed">
+                <strong>"{deleteConfirmCategory.name}"</strong> kategorisini silmek üzeresiniz. Bu kategoriye ait olan tüm URL'ler silinmeyecek, sadece <em>"Genel (Kategorisiz)"</em> durumuna aktarılacaktır.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmCategory(null)}
+                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-semibold cursor-pointer"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteCategory}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold shadow-xs transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Kategoriyi Sil</span>
                 </button>
               </div>
             </div>

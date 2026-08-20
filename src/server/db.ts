@@ -221,6 +221,7 @@ function initSchema(db: Database) {
       last_checked_at DATETIME,
       last_changed_at DATETIME,
       has_changes INTEGER DEFAULT 0,
+      is_tracked INTEGER DEFAULT 1,
       status TEXT DEFAULT 'active',
       http_status INTEGER DEFAULT 200,
       initial_snapshot_content TEXT,
@@ -233,6 +234,13 @@ function initSchema(db: Database) {
       FOREIGN KEY (category_id) REFERENCES url_monitor_categories (id) ON DELETE SET NULL
     );
   `);
+
+  // Migration: Ensure is_tracked column exists on url_monitored_items
+  try {
+    db.run('ALTER TABLE url_monitored_items ADD COLUMN is_tracked INTEGER DEFAULT 1');
+  } catch (e) {
+    // Column already exists
+  }
 
   // URL Değişiklik ve Snapshot Geçmişi Tablosu
   db.run(`
